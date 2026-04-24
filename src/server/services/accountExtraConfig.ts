@@ -26,7 +26,6 @@ const VALID_CREDENTIAL_MODES = new Set<AccountCredentialMode>([
   'session',
   'apikey',
 ]);
-
 type AccountExtraConfig = {
   platformUserId?: unknown;
   credentialMode?: unknown;

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, create, type ReactTestInstance } from 'react-test-renderer';
 import { MemoryRouter } from 'react-router-dom';
 import { ToastProvider } from '../components/Toast.js';
-import ModernSelect from '../components/ModernSelect.js';
 import Settings from './Settings.js';
 
 const { apiMock } = vi.hoisted(() => ({
@@ -14,7 +13,7 @@ const { apiMock } = vi.hoisted(() => ({
     getRuntimeDatabaseConfig: vi.fn(),
     getBrandList: vi.fn(),
     updateRuntimeSettings: vi.fn(),
-    triggerCheckinAll: vi.fn(),
+    triggerSpreadCheckin: vi.fn(),
     getModelTokenCandidates: vi.fn(),
   },
 }));
@@ -105,8 +104,9 @@ describe('Settings log cleanup schedule', () => {
 
       expect(apiMock.updateRuntimeSettings).toHaveBeenCalledWith({
         checkinCron: '0 8 * * *',
-        checkinScheduleMode: 'interval',
+        checkinScheduleMode: 'spread',
         checkinIntervalHours: 6,
+        checkinSpreadIntervalMinutes: 5,
         balanceRefreshCron: '0 * * * *',
         logCleanupCron: '15 4 * * *',
         logCleanupUsageLogsEnabled: true,
@@ -119,7 +119,7 @@ describe('Settings log cleanup schedule', () => {
   });
 
   it('triggers a one-off checkin from the schedule card', async () => {
-    apiMock.triggerCheckinAll.mockResolvedValue({ success: true });
+    apiMock.triggerSpreadCheckin.mockResolvedValue({ success: true });
 
     let root!: WebTestRenderer;
     try {
@@ -137,7 +137,7 @@ describe('Settings log cleanup schedule', () => {
       const triggerButton = root.root.find((node) => (
         node.type === 'button'
         && typeof node.props.onClick === 'function'
-        && collectText(node).trim() === '测试一次签到'
+        && collectText(node).trim() === '立即开始错峰'
       ));
 
       await act(async () => {
@@ -145,13 +145,13 @@ describe('Settings log cleanup schedule', () => {
       });
       await flushMicrotasks();
 
-      expect(apiMock.triggerCheckinAll).toHaveBeenCalledTimes(1);
+      expect(apiMock.triggerSpreadCheckin).toHaveBeenCalledTimes(1);
     } finally {
       root?.unmount();
     }
   });
 
-  it('renders schedule mode controls with modern selects and ghost action styling', async () => {
+  it('renders spread schedule controls and ghost action styling', async () => {
     let root!: WebTestRenderer;
     try {
       await act(async () => {
@@ -168,7 +168,7 @@ describe('Settings log cleanup schedule', () => {
       const triggerButton = root.root.find((node) => (
         node.type === 'button'
         && typeof node.props.onClick === 'function'
-        && collectText(node).trim() === '测试一次签到'
+        && collectText(node).trim() === '立即开始错峰'
       ));
       const scheduleCard = root.root.find((node) => (
         node.type === 'div'
@@ -177,7 +177,8 @@ describe('Settings log cleanup schedule', () => {
       ));
 
       expect(scheduleCard.findAllByType('select')).toHaveLength(0);
-      expect(scheduleCard.findAllByType(ModernSelect).length).toBeGreaterThanOrEqual(2);
+      expect(collectText(scheduleCard)).toContain('每日开始');
+      expect(collectText(scheduleCard)).toContain('单账号间隔');
       expect(String(triggerButton.props.className || '')).toContain('btn-ghost');
     } finally {
       root?.unmount();

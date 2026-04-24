@@ -3,30 +3,32 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('App sidebar config', () => {
-  it('uses 连接管理 for /accounts and removes standalone /tokens navigation item', () => {
+  it('keeps only the five core navigation entries', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/web/App.tsx'), 'utf8');
 
-    expect(source).toContain("{ to: '/accounts', label: '连接管理'");
-    expect(source).not.toContain("{ to: '/accounts', label: '账号'");
-    expect(source).not.toContain("{ to: '/tokens', label: '令牌管理'");
+    expect(source).toContain('to: "/sites", label: "站点"');
+    expect(source).toContain('to: "/accounts", label: "账户"');
+    expect(source).toContain('to: "/keys", label: "账号 Key"');
+    expect(source).toContain('to: "/checkin", label: "签到"');
+    expect(source).toContain('to: "/import-export", label: "导入导出"');
+    expect(source).not.toContain('to: "/oauth"');
+    expect(source).not.toContain('to: "/routes"');
+    expect(source).not.toContain('to: "/downstream-keys"');
   });
 
-  it('places downstream key navigation under 控制台 instead of 系统', () => {
+  it('preserves legacy redirects to lite routes', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/web/App.tsx'), 'utf8');
-    const consoleGroupIndex = source.indexOf("label: '控制台'");
-    const downstreamIndex = source.indexOf("{ to: '/downstream-keys', label: '下游密钥'");
-    const systemGroupIndex = source.indexOf("label: '系统'");
 
-    expect(consoleGroupIndex).toBeGreaterThanOrEqual(0);
-    expect(downstreamIndex).toBeGreaterThan(consoleGroupIndex);
-    expect(systemGroupIndex).toBeGreaterThan(downstreamIndex);
+    expect(source).toContain('function LegacyPathRedirect');
+    expect(source).toContain('<Route path="/tokens" element={<LegacyPathRedirect to="/keys" />} />');
+    expect(source).toContain('<Route path="/settings/import-export" element={<LegacyPathRedirect to="/import-export" />} />');
   });
 
-  it('adds standalone OAuth 管理 navigation entry', () => {
+  it('does not render the lite guide banner in the main shell', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/web/App.tsx'), 'utf8');
 
-    expect(source).toContain("{ to: '/oauth', label: 'OAuth 管理'");
-    expect(source).toContain("const OAuthManagement = lazy(() => import('./pages/OAuthManagement.js'));");
-    expect(source).toContain('<Route path="/oauth" element={<OAuthManagement />} />');
+    expect(source).not.toContain('当前实例已收缩为最小运维闭环');
+    expect(source).not.toContain('添加站点 -> 添加账户 -> 获取 Key -> 执行签到 -> 导入导出');
+    expect(source).not.toContain('{t("精简版")}');
   });
 });

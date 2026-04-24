@@ -2,12 +2,24 @@ export function resolveAccountCredentialMode(account: any): 'session' | 'apikey'
   const rawMode = String(account?.credentialMode || '').trim().toLowerCase();
   if (rawMode === 'apikey') return 'apikey';
   if (rawMode === 'session') return 'session';
+  const storedMode = readStoredCredentialMode(account);
+  if (storedMode === 'apikey') return 'apikey';
+  if (storedMode === 'session') return 'session';
   if (typeof account?.capabilities?.proxyOnly === 'boolean') {
     return account.capabilities.proxyOnly ? 'apikey' : 'session';
   }
   return typeof account?.accessToken === 'string' && account.accessToken.trim()
     ? 'session'
     : 'apikey';
+}
+
+function readStoredCredentialMode(account: any): string {
+  try {
+    const parsed = JSON.parse(account?.extraConfig || '{}') || {};
+    return String(parsed?.credentialMode || '').trim().toLowerCase();
+  } catch {
+    return '';
+  }
 }
 
 export function parsePositiveInt(input: string | null): number {

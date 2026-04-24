@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const checkinAllMock = vi.fn();
 const checkinAccountMock = vi.fn();
+const isSpreadCheckinActiveMock = vi.fn();
+const startSpreadCheckinNowMock = vi.fn();
 
 vi.mock('../../services/checkinService.js', () => ({
   checkinAll: (...args: unknown[]) => checkinAllMock(...args),
@@ -10,6 +12,9 @@ vi.mock('../../services/checkinService.js', () => ({
 }));
 
 vi.mock('../../services/checkinScheduler.js', () => ({
+  CHECKIN_SPREAD_START_CRON: '0 8 * * *',
+  isSpreadCheckinActive: (...args: unknown[]) => isSpreadCheckinActiveMock(...args),
+  startSpreadCheckinNow: (...args: unknown[]) => startSpreadCheckinNowMock(...args),
   updateCheckinSchedule: vi.fn(),
 }));
 
@@ -35,6 +40,7 @@ vi.mock('../../db/index.js', () => {
       insert: () => insertChain,
       select: () => queryChain,
     },
+    runtimeDbDialect: 'sqlite',
     hasProxyLogStreamTimingColumns: async () => false,
     schema: {
       settings: { key: 'key' },
@@ -49,7 +55,11 @@ describe('POST /api/checkin/trigger background task dedupe', () => {
   beforeEach(async () => {
     checkinAllMock.mockReset();
     checkinAccountMock.mockReset();
+    isSpreadCheckinActiveMock.mockReset();
+    startSpreadCheckinNowMock.mockReset();
     checkinAccountMock.mockResolvedValue({ success: true, message: 'ok' });
+    isSpreadCheckinActiveMock.mockReturnValue(false);
+    startSpreadCheckinNowMock.mockResolvedValue({ started: true, reused: false });
     const { __resetBackgroundTasksForTests } = await import('../../services/backgroundTaskService.js');
     __resetBackgroundTasksForTests();
   });
@@ -58,12 +68,12 @@ describe('POST /api/checkin/trigger background task dedupe', () => {
     vi.clearAllMocks();
   });
 
-  it('reuses the same background task while checkin-all is already running', async () => {
-    let resolveFirst: (value: Array<unknown>) => void = () => {};
-    const firstRun = new Promise<Array<unknown>>((resolve) => {
+  it('reuses the same background task while spread checkin startup is already running', async () => {
+    let resolveFirst: (value: { started: boolean; reused: boolean }) => void = () => {};
+    const firstRun = new Promise<{ started: boolean; reused: boolean }>((resolve) => {
       resolveFirst = resolve;
     });
-    checkinAllMock.mockImplementation(() => firstRun);
+    startSpreadCheckinNowMock.mockImplementation(() => firstRun);
 
     const { checkinRoutes } = await import('./checkin.js');
     const app = Fastify();
@@ -82,10 +92,29 @@ describe('POST /api/checkin/trigger background task dedupe', () => {
     const secondBody = secondResponse.json() as { reused: boolean; jobId: string };
     expect(secondBody.reused).toBe(true);
     expect(secondBody.jobId).toBe(firstBody.jobId);
-    expect(checkinAllMock).toHaveBeenCalledTimes(1);
+    expect(startSpreadCheckinNowMock).toHaveBeenCalledTimes(1);
 
-    resolveFirst([]);
+    resolveFirst({ started: true, reused: false });
     await new Promise((resolve) => setTimeout(resolve, 20));
+    await app.close();
+  });
+
+  it('does not restart an active spread checkin queue', async () => {
+    isSpreadCheckinActiveMock.mockReturnValue(true);
+    const { checkinRoutes } = await import('./checkin.js');
+    const app = Fastify();
+    await app.register(checkinRoutes);
+
+    const response = await app.inject({ method: 'POST', url: '/api/checkin/trigger' });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual(expect.objectContaining({
+      success: true,
+      queued: true,
+      reused: true,
+      message: '错峰签到队列执行中，请稍后查看签到日志',
+    }));
+    expect(startSpreadCheckinNowMock).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -106,6 +135,35 @@ describe('POST /api/checkin/trigger background task dedupe', () => {
       mode: 'cron',
       cronExpr: '0 8 * * *',
       intervalHours: undefined,
+      spreadIntervalMinutes: undefined,
+    });
+    await app.close();
+  });
+
+  it('accepts spread schedule payload with fixed 08:00 start', async () => {
+    const { checkinRoutes } = await import('./checkin.js');
+    const schedulerModule = await import('../../services/checkinScheduler.js');
+    const app = Fastify();
+    await app.register(checkinRoutes);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/checkin/schedule',
+      payload: { mode: 'spread', cron: '5 9 * * *', spreadIntervalMinutes: 3 },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(expect.objectContaining({
+      success: true,
+      mode: 'spread',
+      cron: '0 8 * * *',
+      spreadIntervalMinutes: 3,
+    }));
+    expect((schedulerModule as any).updateCheckinSchedule).toHaveBeenCalledWith({
+      mode: 'spread',
+      cronExpr: '0 8 * * *',
+      intervalHours: undefined,
+      spreadIntervalMinutes: 3,
     });
     await app.close();
   });

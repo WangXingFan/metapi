@@ -44,4 +44,17 @@ describe('applyRuntimeSettings', () => {
 
     expect(config.smtpPort).toBe(587);
   });
+
+  it('keeps spread checkin fixed to the 08:00 start time during hydration', () => {
+    config.checkinCron = '5 9 * * *';
+    config.checkinScheduleMode = 'cron';
+
+    applyRuntimeSettings(new Map([
+      ['checkin_cron', JSON.stringify('5 9 * * *')],
+      ['checkin_schedule_mode', JSON.stringify('spread')],
+    ]));
+
+    expect(config.checkinScheduleMode).toBe('spread');
+    expect(config.checkinCron).toBe('0 8 * * *');
+  });
 });

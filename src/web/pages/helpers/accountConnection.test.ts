@@ -9,6 +9,10 @@ describe('accountConnection helpers', () => {
   it('resolves account credential mode from explicit mode, capabilities, and token presence', () => {
     expect(resolveAccountCredentialMode({ credentialMode: 'apikey' })).toBe('apikey');
     expect(resolveAccountCredentialMode({ capabilities: { proxyOnly: true } })).toBe('apikey');
+    expect(resolveAccountCredentialMode({
+      extraConfig: JSON.stringify({ credentialMode: 'apikey' }),
+      accessToken: 'sk-api-key',
+    })).toBe('apikey');
     expect(resolveAccountCredentialMode({ accessToken: ' session-token ' })).toBe('session');
     expect(resolveAccountCredentialMode({
       credentialMode: 'session',

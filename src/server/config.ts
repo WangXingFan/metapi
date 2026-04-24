@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import type { FastifyServerOptions } from 'fastify';
 import { normalizePayloadRulesConfig } from './services/payloadRules.js';
+import { CHECKIN_SPREAD_START_CRON } from './shared/checkinSchedule.js';
 
 const DEFAULT_REQUEST_BODY_LIMIT = 20 * 1024 * 1024;
 const DEFAULT_CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -32,6 +33,13 @@ function parseCsvList(value: string | undefined): string[] {
 
 function parseOptionalSecret(value: string | undefined): string {
   return (value || '').trim();
+}
+
+function parseCheckinScheduleMode(value: string | undefined): 'cron' | 'interval' | 'spread' {
+  const normalized = (value || 'spread').trim().toLowerCase();
+  if (normalized === 'interval') return 'interval';
+  if (normalized === 'spread') return 'spread';
+  return 'cron';
 }
 
 function parseJsonValue(value: string | undefined): unknown {
@@ -77,11 +85,10 @@ export function buildConfig(env: NodeJS.ProcessEnv) {
     geminiCliClientSecret: parseOptionalSecret(env.GEMINI_CLI_CLIENT_SECRET) || DEFAULT_GEMINI_CLI_CLIENT_SECRET,
     systemProxyUrl: env.SYSTEM_PROXY_URL || '',
     accountCredentialSecret: env.ACCOUNT_CREDENTIAL_SECRET || env.AUTH_TOKEN || 'change-me-admin-token',
-    checkinCron: env.CHECKIN_CRON || '0 8 * * *',
-    checkinScheduleMode: (env.CHECKIN_SCHEDULE_MODE || 'cron').trim().toLowerCase() === 'interval'
-      ? 'interval' as const
-      : 'cron' as const,
+    checkinCron: env.CHECKIN_CRON || CHECKIN_SPREAD_START_CRON,
+    checkinScheduleMode: parseCheckinScheduleMode(env.CHECKIN_SCHEDULE_MODE),
     checkinIntervalHours: Math.min(24, Math.max(1, Math.trunc(parseNumber(env.CHECKIN_INTERVAL_HOURS, 6)))),
+    checkinSpreadIntervalMinutes: Math.min(240, Math.max(1, Math.trunc(parseNumber(env.CHECKIN_SPREAD_INTERVAL_MINUTES, 5)))),
     balanceRefreshCron: env.BALANCE_REFRESH_CRON || '0 * * * *',
     logCleanupCron: env.LOG_CLEANUP_CRON || '0 6 * * *',
     logCleanupConfigured: false,

@@ -379,8 +379,9 @@ export type RuntimeSettingsPayload = {
   proxyDebugRetentionHours?: number;
   proxyDebugMaxBodyBytes?: number;
   checkinCron?: string;
-  checkinScheduleMode?: "cron" | "interval";
+  checkinScheduleMode?: "cron" | "interval" | "spread";
   checkinIntervalHours?: number;
+  checkinSpreadIntervalMinutes?: number;
   balanceRefreshCron?: string;
   logCleanupCron?: string;
   logCleanupUsageLogsEnabled?: boolean;
@@ -901,6 +902,7 @@ export const api = {
 
   // Check-in
   triggerCheckinAll: () => request("/api/checkin/trigger", { method: "POST" }),
+  triggerSpreadCheckin: () => request("/api/checkin/trigger", { method: "POST" }),
   triggerCheckin: (id: number) =>
     request(`/api/checkin/trigger/${id}`, { method: "POST" }),
   getCheckinLogs: (params?: string) =>

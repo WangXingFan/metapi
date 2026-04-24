@@ -3,6 +3,7 @@ import {
   normalizeTokenRouterFailureCooldownMaxSec,
 } from './config.js';
 import { normalizePayloadRulesConfig } from './services/payloadRules.js';
+import { CHECKIN_SPREAD_START_CRON } from './shared/checkinSchedule.js';
 import { normalizeLogCleanupRetentionDays } from './shared/logCleanupRetentionDays.js';
 
 export function parseSettingFromMap<T>(settingsMap: Map<string, string>, key: string): T | undefined {
@@ -101,13 +102,26 @@ export function applyRuntimeSettings(settingsMap: Map<string, string>) {
   if (typeof checkinCron === 'string' && checkinCron) config.checkinCron = checkinCron;
 
   const checkinScheduleMode = parseSettingFromMap<string>(settingsMap, 'checkin_schedule_mode');
-  if (checkinScheduleMode === 'cron' || checkinScheduleMode === 'interval') {
+  if (checkinScheduleMode === 'cron' || checkinScheduleMode === 'interval' || checkinScheduleMode === 'spread') {
     config.checkinScheduleMode = checkinScheduleMode;
+  }
+  if (config.checkinScheduleMode === 'spread') {
+    config.checkinCron = CHECKIN_SPREAD_START_CRON;
   }
 
   const checkinIntervalHours = parseSettingFromMap<number>(settingsMap, 'checkin_interval_hours');
   if (typeof checkinIntervalHours === 'number' && Number.isFinite(checkinIntervalHours) && checkinIntervalHours >= 1 && checkinIntervalHours <= 24) {
     config.checkinIntervalHours = Math.trunc(checkinIntervalHours);
+  }
+
+  const checkinSpreadIntervalMinutes = parseSettingFromMap<number>(settingsMap, 'checkin_spread_interval_minutes');
+  if (
+    typeof checkinSpreadIntervalMinutes === 'number'
+    && Number.isFinite(checkinSpreadIntervalMinutes)
+    && checkinSpreadIntervalMinutes >= 1
+    && checkinSpreadIntervalMinutes <= 240
+  ) {
+    config.checkinSpreadIntervalMinutes = Math.trunc(checkinSpreadIntervalMinutes);
   }
 
   const balanceRefreshCron = parseSettingFromMap<string>(settingsMap, 'balance_refresh_cron');

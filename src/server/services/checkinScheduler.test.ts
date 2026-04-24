@@ -29,8 +29,15 @@ vi.mock('../db/index.js', () => {
     },
     schema: {
       settings: { key: 'key' },
-      accounts: { checkinEnabled: 'checkinEnabled', status: 'status' },
-      sites: { id: 'id' },
+      accounts: {
+        id: 'id',
+        siteId: 'siteId',
+        checkinEnabled: 'checkinEnabled',
+        status: 'status',
+        lastCheckinAt: 'lastCheckinAt',
+        extraConfig: 'extraConfig',
+      },
+      sites: { id: 'id', status: 'status' },
     },
   };
 });
@@ -65,6 +72,7 @@ describe('checkinScheduler', () => {
       intervalHours: 6,
     });
     expect(scheduleMock).toHaveBeenCalledTimes(1);
+    expect(scheduleMock).toHaveBeenCalledWith('0 8 * * *', expect.any(Function));
 
     scheduler.updateCheckinSchedule({
       mode: 'interval',
@@ -72,6 +80,7 @@ describe('checkinScheduler', () => {
     });
     expect(cronStopMock).toHaveBeenCalledTimes(1);
     expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
 
     scheduler.updateCheckinSchedule({
       mode: 'cron',
@@ -80,6 +89,7 @@ describe('checkinScheduler', () => {
     });
     expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
     expect(scheduleMock).toHaveBeenCalledTimes(2);
+    expect(scheduleMock).toHaveBeenCalledWith('5 9 * * *', expect.any(Function));
   });
 
   it('selects due accounts from the last successful checkin time', async () => {
@@ -91,5 +101,37 @@ describe('checkinScheduler', () => {
       { id: 2, lastCheckinAt: '2026-03-20T05:59:59.000Z' },
       { id: 3, lastCheckinAt: '2026-03-20T06:30:00.000Z' },
     ], 6, now)).toEqual([1, 2]);
+  });
+
+  it('switches to spread mode with a daily start cron and timeout spacing', async () => {
+    vi.setSystemTime(new Date(2026, 2, 20, 7, 30, 0, 0));
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    const scheduler = await import('./checkinScheduler.js');
+
+    scheduler.updateCheckinSchedule({
+      mode: 'spread',
+      cronExpr: '5 9 * * *',
+      intervalHours: 6,
+      spreadIntervalMinutes: 10,
+    });
+
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
+    expect(scheduleMock).toHaveBeenCalledWith('0 8 * * *', expect.any(Function));
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+  });
+
+  it('selects one random spread checkin account that has not been tried today', async () => {
+    const scheduler = await import('./checkinScheduler.js');
+    const now = new Date(2026, 2, 20, 8, 0, 0, 0);
+    const sameLocalDay = new Date(2026, 2, 20, 7, 0, 0, 0).toISOString();
+    const attemptState = new Map<number, string>([[4, '2026-03-20']]);
+
+    expect(scheduler.selectSpreadCheckinAccountId([
+      { id: 1, lastCheckinAt: null, extraConfig: null },
+      { id: 2, lastCheckinAt: sameLocalDay, extraConfig: null },
+      { id: 3, lastCheckinAt: null, extraConfig: null },
+      { id: 4, lastCheckinAt: null, extraConfig: null },
+      { id: 5, lastCheckinAt: null, extraConfig: null },
+    ], now, attemptState, 0.99)).toBe(5);
   });
 });

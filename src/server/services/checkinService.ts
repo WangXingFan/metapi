@@ -120,7 +120,7 @@ async function tryAutoRelogin(account: any, site: any): Promise<string | null> {
   return result.accessToken;
 }
 
-export async function checkinAccount(accountId: number, options?: { skipEvent?: boolean; scheduleMode?: 'cron' | 'interval' }) {
+export async function checkinAccount(accountId: number, options?: { skipEvent?: boolean; scheduleMode?: 'cron' | 'interval' | 'spread' }) {
   const rows = await db
     .select()
     .from(schema.accounts)
@@ -320,7 +320,10 @@ export async function checkinAccount(accountId: number, options?: { skipEvent?: 
   };
 }
 
-export async function checkinAll(options?: { accountIds?: number[]; scheduleMode?: 'cron' | 'interval' }) {
+export async function checkinAll(options?: {
+  accountIds?: number[];
+  scheduleMode?: 'cron' | 'interval' | 'spread';
+}) {
   const rows = await db
     .select()
     .from(schema.accounts)

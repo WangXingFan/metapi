@@ -71,6 +71,19 @@ const ACCOUNT_SEGMENTS: Array<{
 ];
 
 const SITE_SELECT_SEARCH_PLACEHOLDER = "筛选站点（名称 / 平台 / URL）";
+const CHECKIN_SPREAD_INTERVAL_OPTIONS = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60].map((minute) => ({
+  value: String(minute),
+  label: `${minute} 分钟`,
+}));
+const CHECKIN_START_CRON = "0 8 * * *";
+
+function normalizeCheckinSpreadIntervalMinutes(input: unknown) {
+  const value = Number(input);
+  if (!Number.isFinite(value)) return 5;
+  const normalized = Math.min(240, Math.max(1, Math.trunc(value)));
+  const option = CHECKIN_SPREAD_INTERVAL_OPTIONS.find((item) => Number(item.value) === normalized);
+  return option ? normalized : 5;
+}
 
 function createLoginForm() {
   return { siteId: 0, username: "", password: "" };
@@ -159,6 +172,14 @@ export default function Accounts() {
     proxyUrl: "",
   });
   const [savingEdit, setSavingEdit] = useState(false);
+  const [showCheckinScheduleSettings, setShowCheckinScheduleSettings] =
+    useState(false);
+  const [loadingCheckinScheduleSettings, setLoadingCheckinScheduleSettings] =
+    useState(false);
+  const [savingCheckinScheduleSettings, setSavingCheckinScheduleSettings] =
+    useState(false);
+  const [checkinScheduleIntervalMinutes, setCheckinScheduleIntervalMinutes] =
+    useState(5);
   const [rebindTarget, setRebindTarget] = useState<any | null>(null);
   const [rebindForm, setRebindForm] = useState(() => createRebindForm());
   const [rebindVerifyResult, setRebindVerifyResult] = useState<any>(null);
@@ -831,6 +852,13 @@ export default function Accounts() {
         proxyOnly: !!fromServer.proxyOnly,
       };
     }
+    if (resolveAccountCredentialMode(account) === "apikey") {
+      return {
+        canCheckin: false,
+        canRefreshBalance: false,
+        proxyOnly: true,
+      };
+    }
     const hasSession =
       typeof account?.accessToken === "string" &&
       account.accessToken.trim().length > 0;
@@ -858,6 +886,48 @@ export default function Accounts() {
     }
   };
 
+  const openCheckinScheduleSettings = async () => {
+    setShowCheckinScheduleSettings(true);
+    setLoadingCheckinScheduleSettings(true);
+    try {
+      const runtimeInfo = await api.getRuntimeSettings();
+      setCheckinScheduleIntervalMinutes(
+        normalizeCheckinSpreadIntervalMinutes(runtimeInfo?.checkinSpreadIntervalMinutes),
+      );
+    } catch (e: any) {
+      toast.error(e.message || "加载签到设置失败");
+    } finally {
+      setLoadingCheckinScheduleSettings(false);
+    }
+  };
+
+  const closeCheckinScheduleSettings = () => {
+    setShowCheckinScheduleSettings(false);
+    setLoadingCheckinScheduleSettings(false);
+    setSavingCheckinScheduleSettings(false);
+  };
+
+  const saveCheckinScheduleSettings = async () => {
+    const intervalMinutes = normalizeCheckinSpreadIntervalMinutes(
+      checkinScheduleIntervalMinutes,
+    );
+    setSavingCheckinScheduleSettings(true);
+    try {
+      await api.updateRuntimeSettings({
+        checkinCron: CHECKIN_START_CRON,
+        checkinScheduleMode: "spread",
+        checkinSpreadIntervalMinutes: intervalMinutes,
+      });
+      setCheckinScheduleIntervalMinutes(intervalMinutes);
+      toast.success(`已设置为每天 08:00 开始，每 ${intervalMinutes} 分钟签到 1 个账号`);
+      closeCheckinScheduleSettings();
+    } catch (e: any) {
+      toast.error(e.message || "保存签到设置失败");
+    } finally {
+      setSavingCheckinScheduleSettings(false);
+    }
+  };
+
   const handleToggleCheckin = async (account: any) => {
     const key = `checkin-toggle-${account.id}`;
     const nextEnabled = !account.checkinEnabled;
@@ -865,7 +935,7 @@ export default function Accounts() {
     try {
       await api.updateAccount(account.id, { checkinEnabled: nextEnabled });
       toast.success(
-        nextEnabled ? "已开启签到" : "已关闭签到（全部签到会忽略此账号）",
+        nextEnabled ? "已开启签到" : "已关闭签到（错峰签到会忽略此账号）",
       );
       load(true);
     } catch (e: any) {
@@ -961,24 +1031,29 @@ export default function Accounts() {
 
   const saveEditPanel = async () => {
     if (!editingAccount) return;
+    const canEditCheckin = resolveAccountCapabilities(editingAccount).canCheckin;
+    const payload: Record<string, unknown> = {
+      username: editForm.username.trim() || undefined,
+      status: editForm.status,
+      unitCost: editForm.unitCost.trim()
+        ? Number(editForm.unitCost.trim())
+        : null,
+      accessToken: editForm.accessToken.trim(),
+      apiToken: editForm.apiToken.trim() || null,
+      isPinned: editForm.isPinned,
+      refreshToken: editForm.refreshToken.trim() || null,
+      tokenExpiresAt: editForm.tokenExpiresAt.trim()
+        ? Number.parseInt(editForm.tokenExpiresAt.trim(), 10)
+        : null,
+      proxyUrl: editForm.proxyUrl.trim() || null,
+    };
+    if (canEditCheckin) {
+      payload.checkinEnabled = editForm.checkinEnabled;
+    }
+
     setSavingEdit(true);
     try {
-      await api.updateAccount(editingAccount.id, {
-        username: editForm.username.trim() || undefined,
-        status: editForm.status,
-        checkinEnabled: editForm.checkinEnabled,
-        unitCost: editForm.unitCost.trim()
-          ? Number(editForm.unitCost.trim())
-          : null,
-        accessToken: editForm.accessToken.trim(),
-        apiToken: editForm.apiToken.trim() || null,
-        isPinned: editForm.isPinned,
-        refreshToken: editForm.refreshToken.trim() || null,
-        tokenExpiresAt: editForm.tokenExpiresAt.trim()
-          ? Number.parseInt(editForm.tokenExpiresAt.trim(), 10)
-          : null,
-        proxyUrl: editForm.proxyUrl.trim() || null,
-      });
+      await api.updateAccount(editingAccount.id, payload);
       toast.success("账号已更新");
       closeEditPanel();
       load(true);
@@ -1296,26 +1371,36 @@ export default function Accounts() {
                   />
                 </div>
                 {activeSegment === "session" && (
-                  <button
-                    onClick={() =>
-                      withLoading(
-                        "checkin-all",
-                        () => api.triggerCheckinAll(),
-                        "已触发全部签到",
-                      )
-                    }
-                    disabled={actionLoading["checkin-all"]}
-                    className="btn btn-soft-primary"
-                  >
-                    {actionLoading["checkin-all"] ? (
-                      <>
-                        <span className="spinner spinner-sm" />
-                        {tr("签到中...")}
-                      </>
-                    ) : (
-                      tr("全部签到")
-                    )}
-                  </button>
+                  <>
+                    <button
+                      onClick={() =>
+                        withLoading(
+                          "checkin-spread",
+                          () => api.triggerSpreadCheckin(),
+                          "已开始错峰签到",
+                        )
+                      }
+                      disabled={actionLoading["checkin-spread"]}
+                      className="btn btn-soft-primary"
+                    >
+                      {actionLoading["checkin-spread"] ? (
+                        <>
+                          <span className="spinner spinner-sm" />
+                          启动中...
+                        </>
+                      ) : (
+                        "开始错峰签到"
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openCheckinScheduleSettings}
+                      className="btn btn-ghost"
+                      style={{ border: "1px solid var(--color-border)" }}
+                    >
+                      签到设置
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={handleRefreshRuntimeHealth}
@@ -1377,28 +1462,41 @@ export default function Accounts() {
               />
             </div>
             {activeSegment === "session" && (
-              <button
-                onClick={async () => {
-                  setShowMobileTools(false);
-                  await withLoading(
-                    "checkin-all",
-                    () => api.triggerCheckinAll(),
-                    "已触发全部签到",
-                  );
-                }}
-                disabled={actionLoading["checkin-all"]}
-                className="btn btn-ghost"
-                style={{ border: "1px solid var(--color-border)" }}
-              >
-                {actionLoading["checkin-all"] ? (
-                  <>
-                    <span className="spinner spinner-sm" />
-                    {tr("签到中...")}
-                  </>
-                ) : (
-                  tr("全部签到")
-                )}
-              </button>
+              <>
+                <button
+                  onClick={async () => {
+                    setShowMobileTools(false);
+                    await withLoading(
+                      "checkin-spread",
+                      () => api.triggerSpreadCheckin(),
+                      "已开始错峰签到",
+                    );
+                  }}
+                  disabled={actionLoading["checkin-spread"]}
+                  className="btn btn-ghost"
+                  style={{ border: "1px solid var(--color-border)" }}
+                >
+                  {actionLoading["checkin-spread"] ? (
+                    <>
+                      <span className="spinner spinner-sm" />
+                      启动中...
+                    </>
+                  ) : (
+                    "开始错峰签到"
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setShowMobileTools(false);
+                    await openCheckinScheduleSettings();
+                  }}
+                  className="btn btn-ghost"
+                  style={{ border: "1px solid var(--color-border)" }}
+                >
+                  签到设置
+                </button>
+              </>
             )}
             <button
               onClick={async () => {
@@ -1543,6 +1641,79 @@ export default function Accounts() {
         />
       ) : (
         <>
+          <CenteredModal
+            open={showCheckinScheduleSettings}
+            onClose={closeCheckinScheduleSettings}
+            title="全局签到设置"
+            maxWidth={520}
+            bodyStyle={{ display: "flex", flexDirection: "column", gap: 14 }}
+            footer={
+              <>
+                <button
+                  type="button"
+                  onClick={closeCheckinScheduleSettings}
+                  className="btn btn-ghost"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={saveCheckinScheduleSettings}
+                  disabled={
+                    loadingCheckinScheduleSettings ||
+                    savingCheckinScheduleSettings
+                  }
+                  className="btn btn-primary"
+                >
+                  {savingCheckinScheduleSettings ? (
+                    <>
+                      <span
+                        className="spinner spinner-sm"
+                        style={{
+                          borderTopColor: "white",
+                          borderColor: "rgba(255,255,255,0.3)",
+                        }}
+                      />{" "}
+                      保存中...
+                    </>
+                  ) : (
+                    "保存设置"
+                  )}
+                </button>
+              </>
+            }
+          >
+            {loadingCheckinScheduleSettings ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div className="skeleton" style={{ height: 16, width: 120 }} />
+                <div className="skeleton" style={{ height: 40, width: "100%" }} />
+              </div>
+            ) : (
+              <ResponsiveFormGrid columns={1}>
+                <label
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    color: "var(--color-text-muted)",
+                    fontSize: 12,
+                  }}
+                >
+                  单账号间隔
+                  <ModernSelect
+                    value={String(checkinScheduleIntervalMinutes)}
+                    onChange={(value) =>
+                      setCheckinScheduleIntervalMinutes(
+                        normalizeCheckinSpreadIntervalMinutes(value),
+                      )
+                    }
+                    options={CHECKIN_SPREAD_INTERVAL_OPTIONS}
+                  />
+                </label>
+              </ResponsiveFormGrid>
+            )}
+          </CenteredModal>
+
           <CenteredModal
             open={showAdd}
             onClose={closeAddPanel}
@@ -2645,26 +2816,30 @@ export default function Accounts() {
                   }
                   style={inputStyle}
                 />
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    ...inputStyle,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={editForm.checkinEnabled}
-                    onChange={(e) =>
-                      setEditForm((prev) => ({
-                        ...prev,
-                        checkinEnabled: e.target.checked,
-                      }))
-                    }
-                  />
-                  启用签到
-                </label>
+                {resolveAccountCapabilities(editingAccount).canCheckin ? (
+                  <>
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        ...inputStyle,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={editForm.checkinEnabled}
+                        onChange={(e) =>
+                          setEditForm((prev) => ({
+                            ...prev,
+                            checkinEnabled: e.target.checked,
+                          }))
+                        }
+                      />
+                      启用签到
+                    </label>
+                  </>
+                ) : null}
                 <input
                   placeholder="Access Token"
                   value={editForm.accessToken}
@@ -2932,12 +3107,12 @@ export default function Accounts() {
                                     }
                                     data-tooltip={
                                       a.checkinEnabled
-                                        ? "点击关闭签到，全部签到会忽略此账号"
+                                        ? "点击关闭签到，错峰签到会忽略此账号"
                                         : "点击开启签到"
                                     }
                                     aria-label={
                                       a.checkinEnabled
-                                        ? "点击关闭签到，全部签到会忽略此账号"
+                                        ? "点击关闭签到，错峰签到会忽略此账号"
                                         : "点击开启签到"
                                     }
                                   >
@@ -3266,12 +3441,12 @@ export default function Accounts() {
                                 }
                                 data-tooltip={
                                   a.checkinEnabled
-                                    ? "点击关闭签到，全部签到会忽略此账号"
+                                    ? "点击关闭签到，错峰签到会忽略此账号"
                                     : "点击开启签到"
                                 }
                                 aria-label={
                                   a.checkinEnabled
-                                    ? "点击关闭签到，全部签到会忽略此账号"
+                                    ? "点击关闭签到，错峰签到会忽略此账号"
                                     : "点击开启签到"
                                 }
                               >

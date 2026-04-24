@@ -6,7 +6,12 @@ import { db, runtimeDbDialect, schema } from '../../db/index.js';
 import { upsertSetting } from '../../db/upsertSetting.js';
 import * as routeRefreshWorkflow from '../../services/routeRefreshWorkflow.js';
 import { getAllBrandNames } from '../../services/brandMatcher.js';
-import { updateBalanceRefreshCron, updateCheckinSchedule, updateLogCleanupSettings } from '../../services/checkinScheduler.js';
+import {
+  CHECKIN_SPREAD_START_CRON,
+  updateBalanceRefreshCron,
+  updateCheckinSchedule,
+  updateLogCleanupSettings,
+} from '../../services/checkinScheduler.js';
 import { sendNotification } from '../../services/notifyService.js';
 import {
   exportBackup,
@@ -68,8 +73,9 @@ interface RuntimeSettingsBody {
   proxyDebugRetentionHours?: number;
   proxyDebugMaxBodyBytes?: number;
   checkinCron?: string;
-  checkinScheduleMode?: 'cron' | 'interval';
+  checkinScheduleMode?: 'cron' | 'interval' | 'spread';
   checkinIntervalHours?: number;
+  checkinSpreadIntervalMinutes?: number;
   balanceRefreshCron?: string;
   logCleanupCron?: string;
   logCleanupUsageLogsEnabled?: boolean;
@@ -341,17 +347,19 @@ function applyImportedSettingToRuntime(key: string, value: unknown) {
         mode: config.checkinScheduleMode,
         cronExpr: config.checkinCron,
         intervalHours: config.checkinIntervalHours,
+        spreadIntervalMinutes: config.checkinSpreadIntervalMinutes,
       });
       return;
     }
     case 'checkin_schedule_mode': {
-      if (value !== 'cron' && value !== 'interval') return;
-      const nextMode: 'cron' | 'interval' = value;
+      if (value !== 'cron' && value !== 'interval' && value !== 'spread') return;
+      const nextMode: 'cron' | 'interval' | 'spread' = value;
       config.checkinScheduleMode = nextMode;
       updateCheckinSchedule({
         mode: config.checkinScheduleMode,
         cronExpr: config.checkinCron,
         intervalHours: config.checkinIntervalHours,
+        spreadIntervalMinutes: config.checkinSpreadIntervalMinutes,
       });
       return;
     }
@@ -363,6 +371,19 @@ function applyImportedSettingToRuntime(key: string, value: unknown) {
         mode: config.checkinScheduleMode,
         cronExpr: config.checkinCron,
         intervalHours: config.checkinIntervalHours,
+        spreadIntervalMinutes: config.checkinSpreadIntervalMinutes,
+      });
+      return;
+    }
+    case 'checkin_spread_interval_minutes': {
+      const intervalMinutes = Number(value);
+      if (!Number.isFinite(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 240) return;
+      config.checkinSpreadIntervalMinutes = Math.trunc(intervalMinutes);
+      updateCheckinSchedule({
+        mode: config.checkinScheduleMode,
+        cronExpr: config.checkinCron,
+        intervalHours: config.checkinIntervalHours,
+        spreadIntervalMinutes: config.checkinSpreadIntervalMinutes,
       });
       return;
     }
@@ -712,6 +733,7 @@ function getRuntimeSettingsResponse(currentAdminIp = '') {
     checkinCron: config.checkinCron,
     checkinScheduleMode: config.checkinScheduleMode,
     checkinIntervalHours: config.checkinIntervalHours,
+    checkinSpreadIntervalMinutes: config.checkinSpreadIntervalMinutes,
     balanceRefreshCron: config.balanceRefreshCron,
     logCleanupCron: config.logCleanupCron,
     logCleanupUsageLogsEnabled: config.logCleanupUsageLogsEnabled,
@@ -984,7 +1006,8 @@ export async function settingsRoutes(app: FastifyInstance) {
 
     const checkinScheduleTouched = body.checkinCron !== undefined
       || body.checkinScheduleMode !== undefined
-      || body.checkinIntervalHours !== undefined;
+      || body.checkinIntervalHours !== undefined
+      || body.checkinSpreadIntervalMinutes !== undefined;
 
     if (body.checkinCron !== undefined) {
       if (!cron.validate(body.checkinCron)) {
@@ -996,8 +1019,12 @@ export async function settingsRoutes(app: FastifyInstance) {
     }
 
     if (body.checkinScheduleMode !== undefined) {
-      if (body.checkinScheduleMode !== 'cron' && body.checkinScheduleMode !== 'interval') {
-        return reply.code(400).send({ success: false, message: '签到方式无效：仅支持 cron 或 interval' });
+      if (
+        body.checkinScheduleMode !== 'cron'
+        && body.checkinScheduleMode !== 'interval'
+        && body.checkinScheduleMode !== 'spread'
+      ) {
+        return reply.code(400).send({ success: false, message: '签到方式无效：仅支持 cron、interval 或 spread' });
       }
       if (body.checkinScheduleMode !== config.checkinScheduleMode) {
         changedLabels.push('签到方式');
@@ -1017,26 +1044,47 @@ export async function settingsRoutes(app: FastifyInstance) {
       config.checkinIntervalHours = nextIntervalHours;
     }
 
+    if (body.checkinSpreadIntervalMinutes !== undefined) {
+      const spreadIntervalMinutes = Number(body.checkinSpreadIntervalMinutes);
+      if (!Number.isFinite(spreadIntervalMinutes) || spreadIntervalMinutes < 1 || spreadIntervalMinutes > 240) {
+        return reply.code(400).send({ success: false, message: '错峰签到间隔必须是 1 到 240 的整数分钟' });
+      }
+      const nextSpreadIntervalMinutes = Math.trunc(spreadIntervalMinutes);
+      if (nextSpreadIntervalMinutes !== config.checkinSpreadIntervalMinutes) {
+        changedLabels.push(`错峰签到间隔（${config.checkinSpreadIntervalMinutes}min -> ${nextSpreadIntervalMinutes}min）`);
+      }
+      config.checkinSpreadIntervalMinutes = nextSpreadIntervalMinutes;
+    }
+
     if (checkinScheduleTouched) {
-      const nextCheckinCron = body.checkinCron !== undefined ? body.checkinCron : config.checkinCron;
-      const nextCheckinScheduleMode: 'cron' | 'interval' = body.checkinScheduleMode !== undefined
+      const nextCheckinScheduleMode: 'cron' | 'interval' | 'spread' = body.checkinScheduleMode !== undefined
         ? body.checkinScheduleMode
         : config.checkinScheduleMode;
+      const requestedCheckinCron = body.checkinCron !== undefined ? body.checkinCron : config.checkinCron;
+      const nextCheckinCron = nextCheckinScheduleMode === 'spread'
+        ? CHECKIN_SPREAD_START_CRON
+        : requestedCheckinCron;
       const nextCheckinIntervalHours = body.checkinIntervalHours !== undefined
         ? Math.trunc(Number(body.checkinIntervalHours))
         : config.checkinIntervalHours;
+      const nextCheckinSpreadIntervalMinutes = body.checkinSpreadIntervalMinutes !== undefined
+        ? Math.trunc(Number(body.checkinSpreadIntervalMinutes))
+        : config.checkinSpreadIntervalMinutes;
 
       updateCheckinSchedule({
         mode: nextCheckinScheduleMode,
         cronExpr: nextCheckinCron,
         intervalHours: nextCheckinIntervalHours,
+        spreadIntervalMinutes: nextCheckinSpreadIntervalMinutes,
       });
       config.checkinCron = nextCheckinCron;
       config.checkinScheduleMode = nextCheckinScheduleMode;
       config.checkinIntervalHours = nextCheckinIntervalHours;
+      config.checkinSpreadIntervalMinutes = nextCheckinSpreadIntervalMinutes;
       upsertSetting('checkin_cron', config.checkinCron);
       upsertSetting('checkin_schedule_mode', config.checkinScheduleMode);
       upsertSetting('checkin_interval_hours', config.checkinIntervalHours);
+      upsertSetting('checkin_spread_interval_minutes', config.checkinSpreadIntervalMinutes);
     }
 
     if (body.balanceRefreshCron !== undefined) {

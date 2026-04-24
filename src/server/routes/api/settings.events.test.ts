@@ -46,6 +46,7 @@ describe('settings and auth events', () => {
     config.checkinCron = '0 8 * * *';
     (config as any).checkinScheduleMode = 'cron';
     (config as any).checkinIntervalHours = 6;
+    (config as any).checkinSpreadIntervalMinutes = 5;
     config.balanceRefreshCron = '0 * * * *';
     config.logCleanupConfigured = false;
     config.logCleanupCron = '0 6 * * *';
@@ -131,6 +132,33 @@ describe('settings and auth events', () => {
     const savedInterval = await db.select().from(schema.settings).where(eq(schema.settings.key, 'checkin_interval_hours')).get();
     expect(savedMode?.value).toBe(JSON.stringify('interval'));
     expect(savedInterval?.value).toBe(JSON.stringify(8));
+  });
+
+  it('persists and returns spread checkin schedule settings', async () => {
+    const updateResponse = await app.inject({
+      method: 'PUT',
+      url: '/api/settings/runtime',
+      payload: {
+        checkinScheduleMode: 'spread',
+        checkinCron: '0 8 * * *',
+        checkinSpreadIntervalMinutes: 10,
+      },
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    const updated = updateResponse.json() as {
+      checkinScheduleMode?: string;
+      checkinCron?: string;
+      checkinSpreadIntervalMinutes?: number;
+    };
+    expect(updated.checkinScheduleMode).toBe('spread');
+    expect(updated.checkinCron).toBe('0 8 * * *');
+    expect(updated.checkinSpreadIntervalMinutes).toBe(10);
+
+    const savedMode = await db.select().from(schema.settings).where(eq(schema.settings.key, 'checkin_schedule_mode')).get();
+    const savedSpreadInterval = await db.select().from(schema.settings).where(eq(schema.settings.key, 'checkin_spread_interval_minutes')).get();
+    expect(savedMode?.value).toBe(JSON.stringify('spread'));
+    expect(savedSpreadInterval?.value).toBe(JSON.stringify(10));
   });
 
   it('persists codex upstream websocket and session lease settings from runtime settings', async () => {

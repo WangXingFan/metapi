@@ -9,6 +9,8 @@ describe('buildConfig', () => {
     expect(config.listenHost).toBe('0.0.0.0');
     expect(config.port).toBe(4000);
     expect(config.dataDir).toBe('./data');
+    expect(config.checkinScheduleMode).toBe('spread');
+    expect(config.checkinCron).toBe('0 8 * * *');
   });
 
   it('aligns desktop deployments with server deployments for listen host', () => {

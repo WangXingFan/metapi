@@ -9,15 +9,23 @@ import { sendNotification } from './notifyService.js';
 import { buildDailySummaryNotification, collectDailySummaryMetrics } from './dailySummaryService.js';
 import { cleanupConfiguredLogs } from './logCleanupService.js';
 import { normalizeLogCleanupRetentionDays } from '../shared/logCleanupRetentionDays.js';
+import { CHECKIN_SPREAD_START_CRON } from '../shared/checkinSchedule.js';
+import { formatLocalDate, toLocalDayKeyFromStoredUtc } from './localTimeService.js';
 
-export type CheckinScheduleMode = 'cron' | 'interval';
+export { CHECKIN_SPREAD_START_CRON } from '../shared/checkinSchedule.js';
+
+export type CheckinScheduleMode = 'cron' | 'interval' | 'spread';
 
 let checkinTask: cron.ScheduledTask | null = null;
 let checkinIntervalTimer: ReturnType<typeof setInterval> | null = null;
+let spreadCheckinTimer: ReturnType<typeof setTimeout> | null = null;
 let balanceTask: cron.ScheduledTask | null = null;
 let dailySummaryTask: cron.ScheduledTask | null = null;
 let logCleanupTask: cron.ScheduledTask | null = null;
 const intervalAttemptByAccount = new Map<number, number>();
+const spreadAttemptDayByAccount = new Map<number, string>();
+let spreadCheckinRunning = false;
+let spreadActiveDayKey: string | null = null;
 
 const DAILY_SUMMARY_DEFAULT_CRON = '58 23 * * *';
 const LOG_CLEANUP_DEFAULT_CRON = '0 6 * * *';
@@ -110,7 +118,11 @@ async function runIntervalCheckinPass(now = new Date()) {
 
   const dueAccountIds = selectDueIntervalCheckinAccountIds(
     rows
-      .filter((row: any) => row.accounts?.checkinEnabled === true && row.accounts?.status === 'active' && row.sites?.status !== 'disabled')
+      .filter((row: any) => (
+        row.accounts?.checkinEnabled === true
+        && row.accounts?.status === 'active'
+        && row.sites?.status !== 'disabled'
+      ))
       .map((row: any) => ({
         id: row.accounts.id,
         lastCheckinAt: row.accounts.lastCheckinAt,
@@ -138,6 +150,157 @@ async function runIntervalCheckinPass(now = new Date()) {
   }
 }
 
+type SpreadCheckinCandidate = {
+  id: number;
+  lastCheckinAt?: string | null;
+};
+
+function parseDailyCronHourMinute(cronExpr: string): { hour: number; minute: number } {
+  const match = /^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\*$/.exec((cronExpr || '').trim());
+  if (!match) return { hour: 8, minute: 0 };
+  const minute = Number(match[1]);
+  const hour = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return { hour: 8, minute: 0 };
+  }
+  return { hour, minute };
+}
+
+function hasReachedDailyCheckinStart(now = new Date(), cronExpr = CHECKIN_SPREAD_START_CRON) {
+  const { hour, minute } = parseDailyCronHourMinute(cronExpr);
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  return nowMinutes >= hour * 60 + minute;
+}
+
+export function selectSpreadCheckinAccountId(
+  rows: SpreadCheckinCandidate[],
+  now = new Date(),
+  attemptState = spreadAttemptDayByAccount,
+  randomValue = Math.random(),
+  dayKey = formatLocalDate(now),
+) {
+  const candidates = rows.filter((row) => {
+    if (toLocalDayKeyFromStoredUtc(row.lastCheckinAt) === dayKey) return false;
+    if (attemptState.get(row.id) === dayKey) return false;
+    return true;
+  });
+  if (candidates.length === 0) return null;
+  const index = Math.min(candidates.length - 1, Math.max(0, Math.floor(randomValue * candidates.length)));
+  return candidates[index]?.id ?? null;
+}
+
+function clearSpreadCheckinTimer() {
+  if (!spreadCheckinTimer) return;
+  clearTimeout(spreadCheckinTimer);
+  spreadCheckinTimer = null;
+}
+
+function scheduleNextSpreadCheckinStep(dayKey: string | null = spreadActiveDayKey) {
+  if (config.checkinScheduleMode !== 'spread') return;
+  if (!dayKey) return;
+  clearSpreadCheckinTimer();
+  const delayMs = Math.max(1, config.checkinSpreadIntervalMinutes) * 60 * 1000;
+  spreadCheckinTimer = setTimeout(() => {
+    spreadCheckinTimer = null;
+    void runSpreadCheckinStep(new Date(), true, dayKey);
+  }, delayMs);
+}
+
+async function runSpreadCheckinStep(now = new Date(), scheduleNext = false, dayKey = formatLocalDate(now)) {
+  if (formatLocalDate(now) !== dayKey) {
+    if (spreadActiveDayKey === dayKey) spreadActiveDayKey = null;
+    clearSpreadCheckinTimer();
+    return;
+  }
+  spreadActiveDayKey = dayKey;
+  if (spreadCheckinRunning) {
+    if (scheduleNext) scheduleNextSpreadCheckinStep(dayKey);
+    return;
+  }
+  spreadCheckinRunning = true;
+  try {
+    const rows = await db
+      .select()
+      .from(schema.accounts)
+      .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
+      .all();
+
+    const accountId = selectSpreadCheckinAccountId(
+      rows
+        .filter((row: any) => (
+          row.accounts?.checkinEnabled === true
+          && row.accounts?.status === 'active'
+          && row.sites?.status !== 'disabled'
+        ))
+        .map((row: any) => ({
+          id: row.accounts.id,
+          lastCheckinAt: row.accounts.lastCheckinAt,
+        })),
+      now,
+      spreadAttemptDayByAccount,
+      Math.random(),
+      dayKey,
+    );
+
+    if (!accountId) {
+      clearSpreadCheckinTimer();
+      if (spreadActiveDayKey === dayKey) spreadActiveDayKey = null;
+      console.log('[Scheduler] Spread check-in complete: no due accounts');
+      return;
+    }
+
+    const results = await checkinAll({
+      accountIds: [accountId],
+      scheduleMode: 'spread',
+    });
+    spreadAttemptDayByAccount.set(accountId, dayKey);
+    const success = results.filter((r) => r.result.success).length;
+    const failed = results.length - success;
+    console.log(`[Scheduler] Spread check-in account ${accountId}: ${success} success, ${failed} failed`);
+    if (scheduleNext) {
+      scheduleNextSpreadCheckinStep(dayKey);
+    }
+  } catch (err) {
+    console.error('[Scheduler] Spread check-in error:', err);
+    if (scheduleNext) {
+      scheduleNextSpreadCheckinStep(dayKey);
+    }
+  } finally {
+    spreadCheckinRunning = false;
+  }
+}
+
+function createSpreadCheckinTask(cronExpr: string) {
+  return cron.schedule(cronExpr, async () => {
+    console.log(`[Scheduler] Starting spread check-in at ${new Date().toISOString()}`);
+    clearSpreadCheckinTimer();
+    const now = new Date();
+    await runSpreadCheckinStep(now, true, formatLocalDate(now));
+  });
+}
+
+export function isSpreadCheckinActive(now = new Date()) {
+  const dayKey = formatLocalDate(now);
+  return spreadActiveDayKey === dayKey && (spreadCheckinRunning || spreadCheckinTimer !== null);
+}
+
+export async function startSpreadCheckinNow(now = new Date()) {
+  if (isSpreadCheckinActive(now)) {
+    return { started: false, reused: true };
+  }
+  if (config.checkinScheduleMode !== 'spread' || config.checkinCron !== CHECKIN_SPREAD_START_CRON) {
+    updateCheckinSchedule({
+      mode: 'spread',
+      cronExpr: CHECKIN_SPREAD_START_CRON,
+      intervalHours: config.checkinIntervalHours,
+      spreadIntervalMinutes: config.checkinSpreadIntervalMinutes,
+    });
+  }
+  clearSpreadCheckinTimer();
+  await runSpreadCheckinStep(now, true, formatLocalDate(now));
+  return { started: true, reused: false };
+}
+
 function stopCheckinSchedule() {
   checkinTask?.stop();
   checkinTask = null;
@@ -145,10 +308,20 @@ function stopCheckinSchedule() {
     clearInterval(checkinIntervalTimer);
     checkinIntervalTimer = null;
   }
+  clearSpreadCheckinTimer();
+  spreadActiveDayKey = null;
 }
 
-function startCheckinSchedule() {
+function startCheckinSchedule(options: { resumeSpreadToday?: boolean } = {}) {
   stopCheckinSchedule();
+  if (config.checkinScheduleMode === 'spread') {
+    checkinTask = createSpreadCheckinTask(config.checkinCron || CHECKIN_SPREAD_START_CRON);
+    const now = new Date();
+    if (options.resumeSpreadToday && hasReachedDailyCheckinStart(now, config.checkinCron || CHECKIN_SPREAD_START_CRON)) {
+      void runSpreadCheckinStep(now, true, formatLocalDate(now));
+    }
+    return;
+  }
   if (config.checkinScheduleMode === 'interval') {
     checkinIntervalTimer = setInterval(() => {
       void runIntervalCheckinPass();
@@ -215,12 +388,16 @@ export async function startScheduler() {
   const activeCheckinCron = await resolveCronSetting('checkin_cron', config.checkinCron);
   const activeCheckinScheduleMode = await resolveJsonSetting<CheckinScheduleMode>(
     'checkin_schedule_mode',
-    (value): value is CheckinScheduleMode => value === 'cron' || value === 'interval',
+    (value): value is CheckinScheduleMode => value === 'cron' || value === 'interval' || value === 'spread',
     config.checkinScheduleMode as CheckinScheduleMode,
   );
   const activeCheckinIntervalHours = await resolvePositiveIntegerSetting(
     'checkin_interval_hours',
     config.checkinIntervalHours,
+  );
+  const activeCheckinSpreadIntervalMinutes = await resolvePositiveIntegerSetting(
+    'checkin_spread_interval_minutes',
+    config.checkinSpreadIntervalMinutes,
   );
   const activeBalanceCron = await resolveCronSetting('balance_refresh_cron', config.balanceRefreshCron);
   const activeDailySummaryCron = await resolveCronSetting('daily_summary_cron', DAILY_SUMMARY_DEFAULT_CRON);
@@ -237,9 +414,10 @@ export async function startScheduler() {
     'log_cleanup_retention_days',
     normalizeLogCleanupRetentionDays(config.logCleanupRetentionDays),
   );
-  config.checkinCron = activeCheckinCron;
   config.checkinScheduleMode = activeCheckinScheduleMode;
+  config.checkinCron = config.checkinScheduleMode === 'spread' ? CHECKIN_SPREAD_START_CRON : activeCheckinCron;
   config.checkinIntervalHours = Math.min(24, Math.max(1, activeCheckinIntervalHours));
+  config.checkinSpreadIntervalMinutes = Math.min(240, Math.max(1, activeCheckinSpreadIntervalMinutes));
   config.balanceRefreshCron = activeBalanceCron;
   config.logCleanupCron = activeLogCleanupCron;
   config.logCleanupUsageLogsEnabled = activeLogCleanupUsageLogsEnabled;
@@ -250,12 +428,15 @@ export async function startScheduler() {
   balanceTask?.stop();
   dailySummaryTask?.stop();
   logCleanupTask?.stop();
-  startCheckinSchedule();
+  startCheckinSchedule({ resumeSpreadToday: true });
   balanceTask = createBalanceTask(activeBalanceCron);
   dailySummaryTask = createDailySummaryTask(activeDailySummaryCron);
   logCleanupTask = createLogCleanupTask(activeLogCleanupCron);
 
-  console.log(`[Scheduler] Check-in schedule: ${config.checkinScheduleMode} (${config.checkinScheduleMode === 'cron' ? activeCheckinCron : `${config.checkinIntervalHours}h`})`);
+  const checkinScheduleDetail = config.checkinScheduleMode === 'spread'
+    ? `${config.checkinCron}, every ${config.checkinSpreadIntervalMinutes}m`
+    : (config.checkinScheduleMode === 'cron' ? activeCheckinCron : `${config.checkinIntervalHours}h`);
+  console.log(`[Scheduler] Check-in schedule: ${config.checkinScheduleMode} (${checkinScheduleDetail})`);
   console.log(`[Scheduler] Balance refresh cron: ${activeBalanceCron}`);
   console.log(`[Scheduler] Daily summary cron: ${activeDailySummaryCron}`);
   console.log(
@@ -268,6 +449,7 @@ export function updateCheckinCron(cronExpr: string) {
     mode: 'cron',
     cronExpr,
     intervalHours: config.checkinIntervalHours,
+    spreadIntervalMinutes: config.checkinSpreadIntervalMinutes,
   });
 }
 
@@ -275,13 +457,14 @@ export function updateCheckinSchedule(input: {
   mode: CheckinScheduleMode;
   cronExpr?: string;
   intervalHours?: number;
+  spreadIntervalMinutes?: number;
 }) {
   const nextMode = input.mode;
-  if (nextMode !== 'cron' && nextMode !== 'interval') {
+  if (nextMode !== 'cron' && nextMode !== 'interval' && nextMode !== 'spread') {
     throw new Error(`Invalid checkin schedule mode: ${String(nextMode)}`);
   }
 
-  const nextCronExpr = input.cronExpr ?? config.checkinCron;
+  const nextCronExpr = nextMode === 'spread' ? CHECKIN_SPREAD_START_CRON : (input.cronExpr ?? config.checkinCron);
   if (!cron.validate(nextCronExpr)) throw new Error(`Invalid cron: ${nextCronExpr}`);
 
   const nextIntervalHours = input.intervalHours ?? config.checkinIntervalHours;
@@ -289,9 +472,15 @@ export function updateCheckinSchedule(input: {
     throw new Error(`Invalid interval hours: ${String(nextIntervalHours)}`);
   }
 
+  const nextSpreadIntervalMinutes = input.spreadIntervalMinutes ?? config.checkinSpreadIntervalMinutes;
+  if (!Number.isFinite(nextSpreadIntervalMinutes) || nextSpreadIntervalMinutes < 1 || nextSpreadIntervalMinutes > 240) {
+    throw new Error(`Invalid spread interval minutes: ${String(nextSpreadIntervalMinutes)}`);
+  }
+
   config.checkinScheduleMode = nextMode;
   config.checkinCron = nextCronExpr;
   config.checkinIntervalHours = Math.trunc(nextIntervalHours);
+  config.checkinSpreadIntervalMinutes = Math.trunc(nextSpreadIntervalMinutes);
   startCheckinSchedule();
 }
 
@@ -331,4 +520,7 @@ export function __resetCheckinSchedulerForTests() {
   dailySummaryTask = null;
   logCleanupTask = null;
   intervalAttemptByAccount.clear();
+  spreadAttemptDayByAccount.clear();
+  spreadCheckinRunning = false;
+  spreadActiveDayKey = null;
 }

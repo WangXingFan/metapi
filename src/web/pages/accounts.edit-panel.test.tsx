@@ -17,6 +17,8 @@ const { apiMock, toastMock } = vi.hoisted(() => ({
     refreshAccountHealth: vi.fn(),
     checkModels: vi.fn(),
     getAccountModels: vi.fn(),
+    getRuntimeSettings: vi.fn(),
+    updateRuntimeSettings: vi.fn(),
   },
   toastMock: {
     success: vi.fn(),
@@ -80,6 +82,11 @@ describe('Accounts edit panel', () => {
     apiMock.updateSiteDisabledModels.mockResolvedValue({ success: true });
     apiMock.rebuildRoutes.mockResolvedValue({ success: true });
     apiMock.refreshAccountHealth.mockResolvedValue({ success: true });
+    apiMock.getRuntimeSettings.mockResolvedValue({
+      checkinScheduleMode: 'cron',
+      checkinSpreadIntervalMinutes: 5,
+    });
+    apiMock.updateRuntimeSettings.mockResolvedValue({ success: true });
     apiMock.getAccountModels.mockResolvedValue({
       siteId: 1,
       siteName: 'Site A',
@@ -126,6 +133,128 @@ describe('Accounts edit panel', () => {
         && node.props.placeholder === '账号名称'
       ));
       expect(usernameInput.props.value).toBe('alpha');
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('saves the global checkin interval from the account toolbar', async () => {
+    let root!: WebTestRenderer;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/accounts']}>
+            <ToastProvider>
+              <Accounts />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      const settingsButton = root.root.find((node) => (
+        node.type === 'button'
+        && typeof node.props.onClick === 'function'
+        && collectText(node).trim() === '签到设置'
+      ));
+
+      await act(async () => {
+        await settingsButton.props.onClick();
+      });
+      await flushMicrotasks();
+
+      const intervalSelect = root.root.find((node) => (
+        node.props?.value === '5'
+        && typeof node.props.onChange === 'function'
+        && Array.isArray(node.props.options)
+        && node.props.options.some((option: any) => option.value === '10')
+      ));
+
+      await act(async () => {
+        intervalSelect.props.onChange('10');
+      });
+
+      const saveButton = root.root.find((node) => (
+        node.type === 'button'
+        && typeof node.props.onClick === 'function'
+        && collectText(node).trim() === '保存设置'
+      ));
+
+      await act(async () => {
+        await saveButton.props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(apiMock.updateRuntimeSettings).toHaveBeenCalledWith({
+        checkinCron: '0 8 * * *',
+        checkinScheduleMode: 'spread',
+        checkinSpreadIntervalMinutes: 10,
+      });
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('hides checkin fields for API key account edits', async () => {
+    apiMock.getAccounts.mockResolvedValue([
+      {
+        id: 2,
+        siteId: 1,
+        username: 'api-key',
+        accessToken: 'sk-api-key',
+        status: 'active',
+        checkinEnabled: true,
+        extraConfig: JSON.stringify({
+          credentialMode: 'apikey',
+        }),
+        site: { id: 1, name: 'Site A', status: 'active', platform: 'new-api' },
+      },
+    ]);
+
+    let root!: WebTestRenderer;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/accounts?segment=apikey']}>
+            <ToastProvider>
+              <Accounts />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      const editButton = root.root.find((node) => (
+        node.type === 'button'
+        && typeof node.props.onClick === 'function'
+        && collectText(node).trim() === '编辑'
+      ));
+
+      await act(async () => {
+        editButton.props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(root.root.findAll((node) => (
+        node.type === 'input'
+        && node.props.type === 'time'
+      ))).toHaveLength(0);
+      expect(JSON.stringify(root.toJSON())).not.toContain('启用签到');
+
+      const saveButton = root.root.find((node) => (
+        node.type === 'button'
+        && typeof node.props.onClick === 'function'
+        && collectText(node).trim() === '保存修改'
+      ));
+
+      await act(async () => {
+        await saveButton.props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(apiMock.updateAccount).toHaveBeenCalledWith(2, expect.not.objectContaining({
+        checkinEnabled: expect.anything(),
+      }));
     } finally {
       root?.unmount();
     }

@@ -157,11 +157,11 @@ export default function CheckinLog() {
   const handleTriggerAll = async () => {
     setTriggering(true);
     try {
-      const res = await api.triggerCheckinAll();
+      const res = await api.triggerSpreadCheckin();
       if (res?.queued) {
-        toast.info(res.message || "已开始签到，请稍后查看签到记录");
+        toast.info(res.message || "已开始错峰签到，请稍后查看签到记录");
       } else {
-        toast.success(res?.message || "签到已执行");
+        toast.success(res?.message || "错峰签到已启动");
       }
       await load();
     } catch (e: any) {
@@ -260,10 +260,10 @@ export default function CheckinLog() {
           {triggering ? (
             <>
               <span className="spinner spinner-sm" />
-              触发中...
+              启动中...
             </>
           ) : (
-            "运行所有签到"
+            "开始错峰签到"
           )}
         </button>
       </div>
@@ -562,7 +562,7 @@ export default function CheckinLog() {
               />
             </svg>
             <div className="empty-state-title">暂无签到记录</div>
-            <div className="empty-state-desc">点击“运行所有签到”开始执行</div>
+            <div className="empty-state-desc">点击“开始错峰签到”开始执行</div>
           </div>
         )}
       </div>
