@@ -341,9 +341,6 @@ export default function LiteKeys() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <strong style={{ fontSize: 24, lineHeight: 1 }}>{item.value}</strong>
-              <span className={`badge ${item.tone}`} style={{ fontSize: 11 }}>
-                核心链路
-              </span>
             </div>
           </div>
         ))}

@@ -12,6 +12,7 @@ describe("adminSnapshotStore", () => {
   let readAdminSnapshot: AdminSnapshotStoreModule["readAdminSnapshot"];
   let writeAdminSnapshot: AdminSnapshotStoreModule["writeAdminSnapshot"];
   let deleteExpiredAdminSnapshots: AdminSnapshotStoreModule["deleteExpiredAdminSnapshots"];
+  let closeDbConnections: DbModule["closeDbConnections"];
   let dataDir = "";
   let previousDataDir: string | undefined;
 
@@ -25,6 +26,7 @@ describe("adminSnapshotStore", () => {
     const storeModule = await import("./adminSnapshotStore.js");
     db = dbModule.db;
     schema = dbModule.schema;
+    closeDbConnections = dbModule.closeDbConnections;
     readAdminSnapshot = storeModule.readAdminSnapshot;
     writeAdminSnapshot = storeModule.writeAdminSnapshot;
     deleteExpiredAdminSnapshots = storeModule.deleteExpiredAdminSnapshots;
@@ -34,7 +36,8 @@ describe("adminSnapshotStore", () => {
     await db.delete(schema.adminSnapshots).run();
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await closeDbConnections();
     if (previousDataDir === undefined) {
       delete process.env.DATA_DIR;
     } else {

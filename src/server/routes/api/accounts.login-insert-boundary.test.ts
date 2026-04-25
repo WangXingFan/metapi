@@ -38,6 +38,7 @@ describe('accounts login insert boundary', () => {
   let app: FastifyInstance;
   let db: DbModule['db'];
   let schema: DbModule['schema'];
+  let closeDbConnections: DbModule['closeDbConnections'];
   let dataDir = '';
 
   beforeAll(async () => {
@@ -49,6 +50,7 @@ describe('accounts login insert boundary', () => {
     const routesModule = await import('./accounts.js');
     db = dbModule.db;
     schema = dbModule.schema;
+    closeDbConnections = dbModule.closeDbConnections;
 
     app = Fastify();
     await app.register(routesModule.accountsRoutes);
@@ -67,6 +69,7 @@ describe('accounts login insert boundary', () => {
 
   afterAll(async () => {
     await app.close();
+    await closeDbConnections();
     if (dataDir) {
       rmSync(dataDir, { recursive: true, force: true });
     }

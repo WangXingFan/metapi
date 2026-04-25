@@ -2,16 +2,14 @@ type StartupSummaryInput = {
   port: number;
   host: string;
   authToken: string;
-  proxyToken: string;
+  proxyToken?: string;
 };
 
 type StartupEndpoints = {
   baseUrl: string;
   adminDashboardUrl: string;
   adminApiExample: string;
-  proxyApiExample: string;
   adminApiCurl: string;
-  proxyApiCurl: string;
 };
 
 function resolveDisplayHost(host: string): string {
@@ -23,17 +21,13 @@ function resolveDisplayHost(host: string): string {
 export function buildStartupEndpoints(input: StartupSummaryInput): StartupEndpoints {
   const displayHost = resolveDisplayHost(input.host);
   const baseUrl = `http://${displayHost}:${input.port}`;
-
-  const adminApiExample = `${baseUrl}/api/stats/dashboard`;
-  const proxyApiExample = `${baseUrl}/v1/chat/completions`;
+  const adminApiExample = `${baseUrl}/api/settings/auth/info`;
 
   return {
     baseUrl,
     adminDashboardUrl: baseUrl,
     adminApiExample,
-    proxyApiExample,
     adminApiCurl: `curl '${adminApiExample}' -H 'Authorization: Bearer ${input.authToken}'`,
-    proxyApiCurl: `curl '${proxyApiExample}' -H 'Authorization: Bearer ${input.proxyToken}' -H 'Content-Type: application/json' -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"ping"}]}'`,
   };
 }
 
@@ -42,10 +36,8 @@ export function buildStartupSummaryLines(input: StartupSummaryInput): string[] {
 
   return [
     `metapi running on ${input.host}:${input.port}`,
-    `Dashboard: ${endpoints.adminDashboardUrl}`,
-    `Admin API: ${endpoints.adminApiExample}`,
-    `Proxy API: ${endpoints.proxyApiExample}`,
+    `Lite console: ${endpoints.adminDashboardUrl}`,
+    `Admin health API: ${endpoints.adminApiExample}`,
     `Admin curl: ${endpoints.adminApiCurl}`,
-    `Proxy curl: ${endpoints.proxyApiCurl}`,
   ];
 }

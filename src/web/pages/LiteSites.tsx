@@ -207,10 +207,10 @@ export default function LiteSites() {
   };
 
   const summaryCards = [
-    { label: "站点总数", value: summary.total, tone: "badge-info" },
-    { label: "可用站点", value: summary.enabled, tone: "badge-success" },
-    { label: "停用站点", value: summary.disabled, tone: "badge-muted" },
-    { label: "已配置签到入口", value: summary.withCheckin, tone: "badge-warning" },
+    { label: "站点总数", value: summary.total },
+    { label: "可用站点", value: summary.enabled },
+    { label: "停用站点", value: summary.disabled },
+    { label: "已配置签到入口", value: summary.withCheckin },
   ];
 
   return (
@@ -239,12 +239,7 @@ export default function LiteSites() {
             <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 8 }}>
               {item.label}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <strong style={{ fontSize: 24, lineHeight: 1 }}>{item.value}</strong>
-              <span className={`badge ${item.tone}`} style={{ fontSize: 11 }}>
-                核心保留
-              </span>
-            </div>
+            <strong style={{ fontSize: 24, lineHeight: 1 }}>{item.value}</strong>
           </div>
         ))}
       </div>

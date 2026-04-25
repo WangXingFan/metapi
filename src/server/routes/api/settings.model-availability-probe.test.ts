@@ -23,6 +23,7 @@ describe('settings model availability probe runtime setting', () => {
   let config: ConfigModule['config'];
   let db: DbModule['db'];
   let schema: DbModule['schema'];
+  let closeDbConnections: DbModule['closeDbConnections'];
   let dataDir = '';
 
   beforeAll(async () => {
@@ -36,6 +37,7 @@ describe('settings model availability probe runtime setting', () => {
 
     db = dbModule.db;
     schema = dbModule.schema;
+    closeDbConnections = dbModule.closeDbConnections;
     config = configModule.config;
 
     app = Fastify();
@@ -51,6 +53,7 @@ describe('settings model availability probe runtime setting', () => {
 
   afterAll(async () => {
     await app.close();
+    await closeDbConnections();
     rmSync(dataDir, { recursive: true, force: true });
     delete process.env.DATA_DIR;
   });

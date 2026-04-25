@@ -31,6 +31,7 @@ describe('account tokens sync routes with site status', () => {
   let db: DbModule['db'];
   let schema: DbModule['schema'];
   let maskToken: AccountTokenServiceModule['maskToken'];
+  let closeDbConnections: DbModule['closeDbConnections'];
   let dataDir = '';
   let previousDataDir: string | undefined;
   let seedId = 0;
@@ -74,6 +75,7 @@ describe('account tokens sync routes with site status', () => {
     const routesModule = await import('./accountTokens.js');
     db = dbModule.db;
     schema = dbModule.schema;
+    closeDbConnections = dbModule.closeDbConnections;
     maskToken = accountTokenServiceModule.maskToken;
 
     app = Fastify();
@@ -100,6 +102,7 @@ describe('account tokens sync routes with site status', () => {
 
   afterAll(async () => {
     await app.close();
+    await closeDbConnections();
     if (previousDataDir === undefined) {
       delete process.env.DATA_DIR;
     } else {

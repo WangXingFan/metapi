@@ -14,6 +14,7 @@ describe("accounts snapshot v2", () => {
   let app: FastifyInstance;
   let db: DbModule["db"];
   let schema: DbModule["schema"];
+  let closeDbConnections: DbModule["closeDbConnections"];
   let dataDir = "";
   let previousDataDir: string | undefined;
 
@@ -27,6 +28,7 @@ describe("accounts snapshot v2", () => {
     const routesModule = await import("./accounts.js");
     db = dbModule.db;
     schema = dbModule.schema;
+    closeDbConnections = dbModule.closeDbConnections;
 
     app = Fastify();
     await app.register(routesModule.accountsRoutes);
@@ -47,6 +49,7 @@ describe("accounts snapshot v2", () => {
 
   afterAll(async () => {
     await app.close();
+    await closeDbConnections();
     if (previousDataDir === undefined) {
       delete process.env.DATA_DIR;
     } else {

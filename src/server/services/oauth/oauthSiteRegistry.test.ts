@@ -8,6 +8,7 @@ type DbModule = typeof import('../../db/index.js');
 describe('oauth site registry', () => {
   let db: DbModule['db'];
   let schema: DbModule['schema'];
+  let closeDbConnections: DbModule['closeDbConnections'];
   let dataDir = '';
 
   beforeAll(async () => {
@@ -17,13 +18,15 @@ describe('oauth site registry', () => {
     const dbModule = await import('../../db/index.js');
     db = dbModule.db;
     schema = dbModule.schema;
+    closeDbConnections = dbModule.closeDbConnections;
   });
 
   beforeEach(async () => {
     await db.delete(schema.sites).run();
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await closeDbConnections();
     delete process.env.DATA_DIR;
     if (dataDir) {
       rmSync(dataDir, { recursive: true, force: true });

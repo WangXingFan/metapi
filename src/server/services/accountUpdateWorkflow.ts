@@ -1,9 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
-import {
-  convergeAccountMutation,
-  rebuildRoutesBestEffort,
-} from './accountMutationWorkflow.js';
+import { convergeAccountMutation } from './accountMutationWorkflow.js';
 
 type AccountUpdateWorkflowInput = {
   accountId: number;
@@ -17,11 +14,6 @@ type AccountUpdateWorkflowInput = {
 };
 
 export async function applyAccountUpdateWorkflow(input: AccountUpdateWorkflowInput) {
-  const isExpiredApiKeyRecoveryFlow = Boolean(
-    input.preserveExpiredStatus
-    && input.allowInactiveModelRefresh
-    && input.reactivateAfterSuccessfulModelRefresh,
-  );
   const persistedUpdates: Partial<typeof schema.accounts.$inferInsert> = {
     ...input.updates,
     ...(input.preserveExpiredStatus ? { status: 'expired' } : {}),
@@ -37,30 +29,10 @@ export async function applyAccountUpdateWorkflow(input: AccountUpdateWorkflowInp
     accountId: input.accountId,
     preferredApiToken: input.preferredApiToken,
     defaultTokenSource: 'manual',
-    refreshModels: input.refreshModels,
-    allowInactiveModelRefresh: input.allowInactiveModelRefresh,
+    refreshModels: false,
     rebuildRoutes: false,
     continueOnError: input.continueOnError,
   });
-
-  if (
-    input.reactivateAfterSuccessfulModelRefresh
-    && convergence.modelRefreshResult?.status === 'success'
-  ) {
-    await db.update(schema.accounts)
-      .set({
-        status: 'active',
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.accounts.id, input.accountId))
-      .run();
-  }
-
-  const shouldRebuildRoutes = !isExpiredApiKeyRecoveryFlow
-    || convergence.modelRefreshResult?.status === 'success';
-  if (shouldRebuildRoutes) {
-    await rebuildRoutesBestEffort();
-  }
 
   const account = await db.select()
     .from(schema.accounts)

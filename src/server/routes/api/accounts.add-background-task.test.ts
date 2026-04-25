@@ -167,8 +167,8 @@ describe('accounts background initialization', () => {
 
       expect(syncTokensFromUpstreamMock).toHaveBeenCalledTimes(1);
       expect(refreshBalanceMock).toHaveBeenCalledTimes(1);
-      expect(refreshModelsForAccountMock).toHaveBeenCalledTimes(1);
-      expect(rebuildTokenRoutesFromAvailabilityMock).toHaveBeenCalledTimes(1);
+      expect(refreshModelsForAccountMock).not.toHaveBeenCalled();
+      expect(rebuildTokenRoutesFromAvailabilityMock).not.toHaveBeenCalled();
       expect(task).toMatchObject({ status: 'succeeded' });
     } finally {
       releaseTokens?.([]);

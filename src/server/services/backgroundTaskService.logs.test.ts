@@ -21,8 +21,8 @@ describe('background task log streaming', () => {
 
     const { task } = startBackgroundTask(
       {
-        type: 'update-center.deploy',
-        title: '更新部署',
+        type: 'lite.maintenance',
+        title: '后台维护',
       },
       async () => {
         await runnerGate;
@@ -50,8 +50,8 @@ describe('background task log streaming', () => {
 
     const { task } = startBackgroundTask(
       {
-        type: 'update-center.deploy',
-        title: '更新部署',
+        type: 'lite.maintenance',
+        title: '后台维护',
       },
       async () => {
         await runnerGate;
@@ -84,8 +84,8 @@ describe('background task log streaming', () => {
 
     const { task } = startBackgroundTask(
       {
-        type: 'update-center.deploy',
-        title: '更新部署',
+        type: 'lite.maintenance',
+        title: '后台维护',
       },
       async () => {
         await runnerGate;

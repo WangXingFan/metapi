@@ -8,7 +8,6 @@ import {
   mergeAccountExtraConfig,
   type AccountCredentialMode,
 } from './accountExtraConfig.js';
-import { runWithSiteApiEndpointPool } from './siteApiEndpointService.js';
 import { type AccountCreatePayload } from '../contracts/accountsRoutePayloads.js';
 import { convergeAccountMutation } from './accountMutationWorkflow.js';
 
@@ -22,7 +21,6 @@ type AccountInitializationParams = {
   accessToken: string;
   apiToken: string;
   platformUserId?: number;
-  skipModelFetch?: boolean;
 };
 
 export type CreateManualAccountParams = {
@@ -69,27 +67,6 @@ async function getNextAccountSortOrder(): Promise<number> {
   return max + 1;
 }
 
-async function getModelsWithSiteApiEndpointPool(
-  site: typeof schema.sites.$inferSelect,
-  adapter: NonNullable<ReturnType<typeof getAdapter>>,
-  accessToken: string,
-  platformUserId?: number,
-): Promise<string[]> {
-  const timeoutMessage = buildAccountVerifyTimeoutMessage();
-  const deadline = Date.now() + ACCOUNT_VERIFY_TIMEOUT_MS;
-  return runWithSiteApiEndpointPool(site, (target) => {
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) {
-      throw new Error(timeoutMessage);
-    }
-    return withTimeout(
-      () => adapter.getModels(target.baseUrl, accessToken, platformUserId),
-      remainingMs,
-      timeoutMessage,
-    );
-  });
-}
-
 async function initializeAccountInBackground({
   accountId,
   site,
@@ -98,7 +75,6 @@ async function initializeAccountInBackground({
   accessToken,
   apiToken,
   platformUserId,
-  skipModelFetch,
 }: AccountInitializationParams) {
   const summary = {
     accountId,
@@ -124,31 +100,20 @@ async function initializeAccountInBackground({
     ensurePreferredTokenBeforeSync: tokenType === 'session',
     upstreamTokens: fetchedUpstreamTokens,
     refreshBalance: tokenType === 'session',
-    refreshModels: skipModelFetch !== true,
-    rebuildRoutes: skipModelFetch !== true,
+    refreshModels: false,
+    rebuildRoutes: false,
     continueOnError: true,
   });
   summary.refreshedBalance = convergence.refreshedBalance;
-  summary.refreshedModels = convergence.refreshedModels;
-  summary.rebuiltRoutes = convergence.rebuiltRoutes;
 
   return summary;
 }
 
-function buildQueuedAccountInitializationMessage(
-  tokenType: 'session' | 'apikey' | 'unknown',
-  skipModelFetch?: boolean,
-) {
-  if (tokenType === 'session' && skipModelFetch === true) {
+function buildQueuedAccountInitializationMessage(tokenType: 'session' | 'apikey' | 'unknown') {
+  if (tokenType === 'session') {
     return '账号已添加，后台正在同步令牌和余额信息。';
   }
-  if (tokenType === 'session') {
-    return '账号已添加，后台正在同步令牌、余额和模型信息。';
-  }
-  if (skipModelFetch === true) {
-    return '已添加为 API Key 账号（可用于代理转发）。';
-  }
-  return '已添加为 API Key 账号，后台正在同步模型和路由信息。';
+  return '已添加为 API Key 账号。';
 }
 
 export async function createManualAccount({
@@ -168,30 +133,23 @@ export async function createManualAccount({
   let verifiedModels: string[] = [];
 
   if (credentialMode === 'apikey') {
-    if (body.skipModelFetch === true) {
-      tokenType = 'apikey';
-      accessToken = '';
-      if (!apiToken) apiToken = rawAccessToken;
-    } else {
-      const models = await getModelsWithSiteApiEndpointPool(
-        site,
-        adapter,
-        rawAccessToken,
-        body.platformUserId,
-      );
-      verifiedModels = Array.isArray(models)
-        ? models.filter((item) => typeof item === 'string' && item.trim().length > 0)
-        : [];
-      if (verifiedModels.length === 0) {
-        const error = new Error('API Key 验证失败：未获取到可用模型');
-        (error as Error & { requiresVerification?: boolean }).requiresVerification = true;
-        throw error;
-      }
-
-      tokenType = 'apikey';
-      accessToken = '';
-      if (!apiToken) apiToken = rawAccessToken;
+    const models = await withTimeout(
+      () => adapter.getModels(site.url, rawAccessToken, body.platformUserId),
+      ACCOUNT_VERIFY_TIMEOUT_MS,
+      buildAccountVerifyTimeoutMessage(),
+    );
+    verifiedModels = Array.isArray(models)
+      ? models.filter((item) => typeof item === 'string' && item.trim().length > 0)
+      : [];
+    if (verifiedModels.length === 0) {
+      const error = new Error('API Key 验证失败：未获取到可用模型，请确认站点和凭据匹配');
+      (error as Error & { requiresVerification?: boolean }).requiresVerification = true;
+      throw error;
     }
+
+    tokenType = 'apikey';
+    accessToken = '';
+    if (!apiToken) apiToken = rawAccessToken;
   } else {
     const verifyResult = await withTimeout(
       () => adapter.verifyToken(site.url, rawAccessToken, body.platformUserId),
@@ -200,7 +158,7 @@ export async function createManualAccount({
     );
     tokenType = verifyResult.tokenType;
     if (tokenType === 'unknown') {
-      const error = new Error('Token 验证失败，请先点击“验证 Token”，验证成功后再绑定账号');
+      const error = new Error('Token 验证失败，请确认站点和凭据匹配');
       (error as Error & { requiresVerification?: boolean }).requiresVerification = true;
       throw error;
     }
@@ -258,7 +216,7 @@ export async function createManualAccount({
     loadErrorMessage: '创建账号失败',
   });
 
-  const shouldQueueInitialization = tokenType === 'session' || body.skipModelFetch !== true;
+  const shouldQueueInitialization = tokenType === 'session';
   let queuedTaskId: string | undefined;
   let queuedMessage: string | undefined;
   if (shouldQueueInitialization) {
@@ -280,11 +238,10 @@ export async function createManualAccount({
         accessToken,
         apiToken,
         platformUserId: resolvedPlatformUserId,
-        skipModelFetch: body.skipModelFetch,
       }),
     );
     queuedTaskId = task.id;
-    queuedMessage = buildQueuedAccountInitializationMessage(tokenType, body.skipModelFetch);
+    queuedMessage = buildQueuedAccountInitializationMessage(tokenType);
   }
 
   const account = await db.select().from(schema.accounts).where(eq(schema.accounts.id, result.id)).get();

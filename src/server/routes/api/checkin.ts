@@ -69,6 +69,23 @@ export async function checkinRoutes(app: FastifyInstance) {
     });
   });
 
+  app.post('/api/checkin/stop', async () => {
+    updateCheckinSchedule({
+      mode: 'cron',
+      cronExpr: CHECKIN_SPREAD_START_CRON,
+      intervalHours: config.checkinIntervalHours,
+      spreadIntervalMinutes: config.checkinSpreadIntervalMinutes,
+    });
+    await upsertSetting('checkin_cron', CHECKIN_SPREAD_START_CRON);
+    await upsertSetting('checkin_schedule_mode', 'cron');
+    await upsertSetting('checkin_spread_interval_minutes', config.checkinSpreadIntervalMinutes);
+    return {
+      success: true,
+      status: 'stopped',
+      message: '已停止错峰签到队列',
+    };
+  });
+
   // Trigger check-in for a specific account
   app.post<{ Params: { id: string } }>('/api/checkin/trigger/:id', async (request) => {
     const id = parseInt(request.params.id, 10);

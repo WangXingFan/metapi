@@ -33,6 +33,43 @@ export const sidebarGroups = [
 ];
 
 const navItems = sidebarGroups[0].items.map(({ to, label }) => ({ to, label }));
+const THEME_STORAGE_KEY = "metapi_theme";
+type ThemeMode = "light" | "dark";
+
+function getInitialTheme(): ThemeMode {
+  if (typeof window === "undefined") return "light";
+  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored === "light" || stored === "dark") return stored;
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function ThemeToggle() {
+  const { t } = useI18n();
+  const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
+  const isDark = theme === "dark";
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
+  return (
+    <button
+      type="button"
+      className={`theme-toggle ${isDark ? "is-dark" : "is-light"}`}
+      aria-label={isDark ? t("切换到浅色模式") : t("切换到深色模式")}
+      aria-pressed={isDark}
+      title={isDark ? t("切换到浅色模式") : t("切换到深色模式")}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+    >
+      <span className="theme-toggle-track" aria-hidden="true">
+        <span className="theme-toggle-thumb">{isDark ? t("暗") : t("亮")}</span>
+      </span>
+      <span className="theme-toggle-label">{isDark ? t("深色") : t("浅色")}</span>
+    </button>
+  );
+}
 
 function LegacyPathRedirect({ to }: { to: string }) {
   const location = useLocation();
@@ -239,6 +276,7 @@ function AppShell() {
           ))}
         </nav>
         <div className="topbar-right">
+          <ThemeToggle />
           <button
             type="button"
             className="btn btn-ghost"

@@ -21,6 +21,7 @@ describe('siteApiKeyMigrationService insert boundary', () => {
   let db: DbModule['db'];
   let schema: DbModule['schema'];
   let migrateSiteApiKeysToAccounts: MigrationModule['migrateSiteApiKeysToAccounts'];
+  let closeDbConnections: DbModule['closeDbConnections'];
   let dataDir = '';
 
   beforeAll(async () => {
@@ -32,6 +33,7 @@ describe('siteApiKeyMigrationService insert boundary', () => {
     const migrationModule = await import('./siteApiKeyMigrationService.js');
     db = dbModule.db;
     schema = dbModule.schema;
+    closeDbConnections = dbModule.closeDbConnections;
     migrateSiteApiKeysToAccounts = migrationModule.migrateSiteApiKeysToAccounts;
   });
 
@@ -42,6 +44,7 @@ describe('siteApiKeyMigrationService insert boundary', () => {
   });
 
   afterAll(async () => {
+    await closeDbConnections();
     if (dataDir) {
       rmSync(dataDir, { recursive: true, force: true });
     }

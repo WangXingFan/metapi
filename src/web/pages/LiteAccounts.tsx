@@ -359,10 +359,7 @@ export default function LiteAccounts() {
           ? Number.parseInt(credentialForm.platformUserId.trim(), 10)
           : undefined,
         credentialMode: credentialForm.credentialMode,
-        skipModelFetch:
-          credentialForm.credentialMode === "apikey"
-            ? credentialForm.skipModelFetch
-            : false,
+        skipModelFetch: true,
       });
       if (result?.success === false) {
         throw new Error(result.message || "添加凭据失败");
@@ -738,7 +735,7 @@ export default function LiteAccounts() {
             <div className="skeleton" style={{ height: 40 }} />
           </div>
         ) : (
-          <div style={{ display: "grid", gap: 14 }}>
+          <div style={{ display: "grid", gap: 10 }}>
             <label>
               <div style={fieldLabelStyle}>每日开始时间</div>
               <input value={CHECKIN_START_TIME} readOnly style={inputStyle} />
@@ -828,7 +825,7 @@ export default function LiteAccounts() {
                 ))}
               </select>
             </label>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
               <label>
                 <div style={fieldLabelStyle}>用户名</div>
                 <input
@@ -890,7 +887,7 @@ export default function LiteAccounts() {
               </select>
             </label>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
               <label>
                 <div style={fieldLabelStyle}>凭据类型</div>
                 <select
@@ -933,11 +930,11 @@ export default function LiteAccounts() {
                     ? "粘贴站点 API Key"
                     : "粘贴 Session / Cookie / Access Token"
                 }
-                style={{ ...inputStyle, minHeight: 120, resize: "vertical", fontFamily: "var(--font-mono)" }}
+                style={{ ...inputStyle, minHeight: credentialForm.credentialMode === "apikey" ? 46 : 84, resize: "vertical", fontFamily: "var(--font-mono)" }}
               />
             </label>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
               <label>
                 <div style={fieldLabelStyle}>平台用户 ID（可选）</div>
                 <input
@@ -949,31 +946,9 @@ export default function LiteAccounts() {
                   style={inputStyle}
                 />
               </label>
-              <label style={{ display: "flex", alignItems: "flex-end" }}>
-                <div
-                  style={{
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--color-border)",
-                    padding: "10px 12px",
-                    width: "100%",
-                    background: "var(--color-bg)",
-                  }}
-                >
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                    <input
-                      type="checkbox"
-                      checked={credentialForm.skipModelFetch}
-                      onChange={(event) =>
-                        setCredentialForm((current) => ({
-                          ...current,
-                          skipModelFetch: event.target.checked,
-                        }))
-                      }
-                    />
-                    API Key 添加时跳过模型拉取
-                  </label>
-                </div>
-              </label>
+              <div style={{ alignSelf: "end", fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                保存前会验证站点和凭据是否匹配。
+              </div>
             </div>
           </div>
         )}

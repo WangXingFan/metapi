@@ -10,6 +10,7 @@ describe('insert helpers', () => {
   let db: DbModule['db'];
   let schema: DbModule['schema'];
   let insertHelpers: InsertHelpersModule;
+  let closeDbConnections: DbModule['closeDbConnections'];
   let dataDir = '';
 
   beforeAll(async () => {
@@ -19,6 +20,7 @@ describe('insert helpers', () => {
     const dbModule = await import('./index.js');
     db = dbModule.db;
     schema = dbModule.schema;
+    closeDbConnections = dbModule.closeDbConnections;
     insertHelpers = await import('./insertHelpers.js');
   });
 
@@ -26,7 +28,8 @@ describe('insert helpers', () => {
     await db.delete(schema.sites).run();
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await closeDbConnections();
     delete process.env.DATA_DIR;
     if (dataDir) {
       rmSync(dataDir, { recursive: true, force: true });

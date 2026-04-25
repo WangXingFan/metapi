@@ -18,30 +18,12 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: '../../dist/web',
       emptyOutDir: true,
-      rollupOptions: {
-        output: {
-          manualChunks(id) {
-            if (id.includes('@visactor/react-vchart') || id.includes('/@visactor/')) {
-              return 'vchart-vendor';
-            }
-            return undefined;
-          },
-        },
-      },
     },
     server: {
       host: frontendHost,
       port: resolvedFrontendPort,
       proxy: {
         '^/api($|/)': {
-          target: proxyTarget,
-          changeOrigin: true,
-        },
-        '^/monitor-proxy($|/)': {
-          target: proxyTarget,
-          changeOrigin: true,
-        },
-        '^/v1($|/)': {
           target: proxyTarget,
           changeOrigin: true,
         },

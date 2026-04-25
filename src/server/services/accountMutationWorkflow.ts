@@ -3,11 +3,21 @@ import {
   ensureDefaultTokenForAccount,
   syncTokensFromUpstream,
 } from './accountTokenService.js';
-import {
-  refreshModelsForAccount,
-  type ModelRefreshResult,
-} from './modelService.js';
-import * as routeRefreshWorkflow from './routeRefreshWorkflow.js';
+
+type ModelRefreshResult = {
+  accountId: number;
+  refreshed: boolean;
+  status: 'skipped';
+  reason: string;
+};
+
+type DisabledRouteRebuildResult = {
+  skipped: true;
+  reason: string;
+};
+
+const MODEL_DISCOVERY_DISABLED_REASON = 'model discovery is disabled in Lite mode';
+const ROUTE_REBUILD_DISABLED_REASON = 'proxy routing is disabled in Lite mode';
 
 type UpstreamTokenLike = {
   name?: string | null;
@@ -17,11 +27,27 @@ type UpstreamTokenLike = {
 };
 
 export type CoverageBatchRebuildResult =
-  | { success: true; result: Awaited<ReturnType<typeof routeRefreshWorkflow.rebuildRoutesOnly>> }
+  | { success: true; result: DisabledRouteRebuildResult }
   | { success: false; error: string };
 
 export async function rebuildRoutesBestEffort(): Promise<boolean> {
-  return routeRefreshWorkflow.rebuildRoutesBestEffort();
+  return false;
+}
+
+function buildSkippedModelRefreshResult(accountId: number): ModelRefreshResult {
+  return {
+    accountId,
+    refreshed: false,
+    status: 'skipped',
+    reason: MODEL_DISCOVERY_DISABLED_REASON,
+  };
+}
+
+function buildDisabledRouteRebuildResult(): DisabledRouteRebuildResult {
+  return {
+    skipped: true,
+    reason: ROUTE_REBUILD_DISABLED_REASON,
+  };
 }
 
 export async function convergeAccountMutation(input: {
@@ -43,7 +69,7 @@ export async function convergeAccountMutation(input: {
   rebuiltRoutes: boolean;
   balanceResult: Awaited<ReturnType<typeof refreshBalance>> | null;
   modelRefreshResult: ModelRefreshResult | null;
-  rebuildResult: Awaited<ReturnType<typeof routeRefreshWorkflow.rebuildRoutesOnly>> | null;
+  rebuildResult: DisabledRouteRebuildResult | null;
 }> {
   const result = {
     defaultTokenId: null as number | null,
@@ -53,7 +79,7 @@ export async function convergeAccountMutation(input: {
     rebuiltRoutes: false,
     balanceResult: null as Awaited<ReturnType<typeof refreshBalance>> | null,
     modelRefreshResult: null as ModelRefreshResult | null,
-    rebuildResult: null as Awaited<ReturnType<typeof routeRefreshWorkflow.rebuildRoutesOnly>> | null,
+    rebuildResult: null as DisabledRouteRebuildResult | null,
   };
 
   const runStep = async <T>(fn: () => Promise<T>): Promise<T | null> => {
@@ -112,23 +138,11 @@ export async function convergeAccountMutation(input: {
   }
 
   if (input.refreshModels) {
-    const modelRefreshResult = await runStep(() => (
-      input.allowInactiveModelRefresh
-        ? refreshModelsForAccount(input.accountId, { allowInactive: true })
-        : refreshModelsForAccount(input.accountId)
-    ));
-    if (modelRefreshResult) {
-      result.modelRefreshResult = modelRefreshResult;
-      result.refreshedModels = modelRefreshResult.refreshed === true;
-    }
+    result.modelRefreshResult = buildSkippedModelRefreshResult(input.accountId);
   }
 
   if (input.rebuildRoutes) {
-    const rebuildResult = await runStep(() => routeRefreshWorkflow.rebuildRoutesOnly());
-    if (rebuildResult) {
-      result.rebuildResult = rebuildResult;
-      result.rebuiltRoutes = true;
-    }
+    result.rebuildResult = buildDisabledRouteRebuildResult();
   }
 
   return result;
@@ -146,7 +160,6 @@ export async function refreshAccountCoverageBatch<TFailure>(input: {
     throw new Error('batchSize must be a positive integer');
   }
 
-  const batchSize = input.batchSize;
   const uniqueAccountIds = Array.from(new Set(
     input.accountIds.filter((id) => Number.isFinite(id) && id > 0),
   ));
@@ -155,42 +168,11 @@ export async function refreshAccountCoverageBatch<TFailure>(input: {
     return { refresh: [], rebuild: null };
   }
 
-  const refresh: Array<ModelRefreshResult | TFailure> = [];
-  for (let offset = 0; offset < uniqueAccountIds.length; offset += batchSize) {
-    const batch = uniqueAccountIds.slice(offset, offset + batchSize);
-    const settled = await Promise.allSettled(
-      batch.map(async (accountId) => refreshModelsForAccount(accountId)),
-    );
-    settled.forEach((entry, index) => {
-      if (entry.status === 'fulfilled') {
-        refresh.push(entry.value);
-        return;
-      }
-
-      const accountId = batch[index] || 0;
-      const errorMessage = entry.reason instanceof Error
-        ? entry.reason.message
-        : String(entry.reason || 'coverage refresh failed');
-      refresh.push(input.mapFailure(accountId, errorMessage));
-    });
-  }
-
-  try {
-    return {
-      refresh,
-      rebuild: {
-        success: true,
-        result: await routeRefreshWorkflow.rebuildRoutesOnly(),
-      },
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error || 'route rebuild failed');
-    return {
-      refresh,
-      rebuild: {
-        success: false,
-        error: errorMessage,
-      },
-    };
-  }
+  return {
+    refresh: uniqueAccountIds.map((accountId) => buildSkippedModelRefreshResult(accountId)),
+    rebuild: {
+      success: true,
+      result: buildDisabledRouteRebuildResult(),
+    },
+  };
 }
