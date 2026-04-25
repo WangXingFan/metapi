@@ -9,54 +9,14 @@ import { authMiddleware } from './middleware/auth.js';
 import { sitesRoutes } from './routes/api/sites.js';
 import { accountsRoutes } from './routes/api/accounts.js';
 import { checkinRoutes } from './routes/api/checkin.js';
-import { tokensRoutes } from './routes/api/tokens.js';
-import { statsRoutes } from './routes/api/stats.js';
 import { authRoutes } from './routes/api/auth.js';
-import { settingsRoutes } from './routes/api/settings.js';
 import { accountTokensRoutes } from './routes/api/accountTokens.js';
-import { searchRoutes } from './routes/api/search.js';
-import { eventsRoutes } from './routes/api/events.js';
-import { taskRoutes } from './routes/api/tasks.js';
-import { testRoutes } from './routes/api/test.js';
-import { monitorRoutes } from './routes/api/monitor.js';
-import { downstreamApiKeysRoutes } from './routes/api/downstreamApiKeys.js';
-import { oauthRoutes } from './routes/api/oauth.js';
-import { siteAnnouncementsRoutes } from './routes/api/siteAnnouncements.js';
-import { updateCenterRoutes } from './routes/api/updateCenter.js';
-import { proxyRoutes } from './routes/proxy/router.js';
+import { settingsRoutes } from './routes/api/settings.js';
 import { startScheduler } from './services/checkinScheduler.js';
 import * as routeRefreshWorkflow from './services/routeRefreshWorkflow.js';
-import { startProxyFileRetentionService, stopProxyFileRetentionService } from './services/proxyFileRetentionService.js';
-import { setLegacyProxyLogRetentionFallbackEnabled, stopProxyLogRetentionService } from './services/proxyLogRetentionService.js';
 import { buildStartupSummaryLines } from './services/startupInfo.js';
 import { repairStoredCreatedAtValues } from './services/storedTimestampRepairService.js';
 import { migrateSiteApiKeysToAccounts } from './services/siteApiKeyMigrationService.js';
-import { ensureDefaultSitesSeeded } from './services/defaultSiteSeedService.js';
-import { ensureOauthIdentityBackfill } from './services/oauth/oauthIdentityBackfill.js';
-import { ensureOauthProviderSitesExist } from './services/oauth/oauthSiteRegistry.js';
-import { startOAuthLoopbackCallbackServers, stopOAuthLoopbackCallbackServers } from './services/oauth/localCallbackServer.js';
-import { startSiteAnnouncementPolling, stopSiteAnnouncementPolling } from './services/siteAnnouncementPollingService.js';
-import {
-  startModelAvailabilityProbeScheduler,
-  stopModelAvailabilityProbeScheduler,
-} from './services/modelAvailabilityProbeService.js';
-import {
-  startChannelRecoveryProbeScheduler,
-  stopChannelRecoveryProbeScheduler,
-} from './services/channelRecoveryProbeService.js';
-import {
-  startSub2ApiManagedRefreshScheduler,
-  stopSub2ApiManagedRefreshScheduler,
-} from './services/sub2apiRefreshScheduler.js';
-import { startUpdateCenterPolling, stopUpdateCenterPolling } from './services/updateCenterPollingService.js';
-import {
-  startAdminSnapshotWarmScheduler,
-  stopAdminSnapshotWarmScheduler,
-} from './services/adminSnapshotWarmService.js';
-import {
-  startUsageAggregationProjectorScheduler,
-  stopUsageAggregationProjectorScheduler,
-} from './services/usageAggregationService.js';
 import { reloadBackupWebdavScheduler } from './services/backupService.js';
 import { ensureRuntimeDatabaseReady } from './runtimeDatabaseBootstrap.js';
 import { isPublicApiRoute, registerDesktopRoutes } from './desktop.js';
@@ -188,16 +148,12 @@ try {
   await ensureProxyLogBillingDetailsColumn();
   await repairStoredCreatedAtValues();
   await migrateSiteApiKeysToAccounts();
-  await ensureDefaultSitesSeeded();
-  await ensureOauthIdentityBackfill();
   await routeRefreshWorkflow.rebuildRoutesOnly();
 
   console.log('Loaded runtime settings overrides');
 } catch (error) {
   console.warn(`Failed to load runtime settings overrides: ${(error as Error)?.message || 'unknown error'}`);
 }
-
-await ensureOauthProviderSitesExist();
 
 const app = Fastify(buildFastifyOptions(config));
 
@@ -215,23 +171,9 @@ await app.register(registerDesktopRoutes);
 await app.register(sitesRoutes);
 await app.register(accountsRoutes);
 await app.register(checkinRoutes);
-await app.register(tokensRoutes);
-await app.register(statsRoutes);
 await app.register(authRoutes);
-await app.register(settingsRoutes);
 await app.register(accountTokensRoutes);
-await app.register(searchRoutes);
-await app.register(eventsRoutes);
-await app.register(siteAnnouncementsRoutes);
-await app.register(updateCenterRoutes);
-await app.register(taskRoutes);
-await app.register(testRoutes);
-await app.register(monitorRoutes);
-await app.register(downstreamApiKeysRoutes);
-await app.register(oauthRoutes);
-
-// Register OpenAI-compatible proxy routes
-await app.register(proxyRoutes);
+await app.register(settingsRoutes);
 
 // Serve static web frontend in production
 const webDir = resolve(dirname(fileURLToPath(import.meta.url)), '../web');
@@ -263,32 +205,6 @@ if (existsSync(webDir)) {
 // Start scheduler
 await startScheduler();
 await reloadBackupWebdavScheduler();
-startSiteAnnouncementPolling();
-startModelAvailabilityProbeScheduler();
-startChannelRecoveryProbeScheduler();
-startSub2ApiManagedRefreshScheduler();
-startUpdateCenterPolling();
-startUsageAggregationProjectorScheduler();
-startAdminSnapshotWarmScheduler();
-try {
-  await startOAuthLoopbackCallbackServers();
-} catch (error) {
-  console.warn(`Failed to start OAuth callback listeners: ${(error as Error)?.message || 'unknown error'}`);
-}
-setLegacyProxyLogRetentionFallbackEnabled(!config.logCleanupConfigured);
-startProxyFileRetentionService();
-app.addHook('onClose', async () => {
-  stopSiteAnnouncementPolling();
-  stopUpdateCenterPolling();
-  stopProxyFileRetentionService();
-  stopProxyLogRetentionService();
-  stopModelAvailabilityProbeScheduler();
-  stopChannelRecoveryProbeScheduler();
-  await stopUsageAggregationProjectorScheduler();
-  await stopAdminSnapshotWarmScheduler();
-  await stopSub2ApiManagedRefreshScheduler();
-  await stopOAuthLoopbackCallbackServers();
-});
 
 // Start server
 try {

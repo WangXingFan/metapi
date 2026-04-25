@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api } from "../api.js";
+import CenteredModal from "../components/CenteredModal.js";
 import { MobileCard, MobileField } from "../components/MobileCard.js";
 import { useIsMobile } from "../components/useIsMobile.js";
 import { useToast } from "../components/Toast.js";
@@ -36,6 +37,7 @@ type TokenItem = {
   name?: string | null;
   tokenMasked?: string | null;
   tokenGroup?: string | null;
+  valueStatus?: string | null;
   enabled?: boolean;
   isDefault?: boolean;
   updatedAt?: string | null;
@@ -51,6 +53,10 @@ function filterOutOauthAccounts(items: AccountItem[]): AccountItem[] {
   return items.filter((item) => !String(item.oauthProvider || "").trim());
 }
 
+function isMaskedPendingToken(token: TokenItem): boolean {
+  return token.valueStatus === "masked_pending";
+}
+
 export default function LiteKeys() {
   const toast = useToast();
   const location = useLocation();
@@ -62,6 +68,9 @@ export default function LiteKeys() {
   const [accountFilter, setAccountFilter] = useState<number>(0);
   const [search, setSearch] = useState("");
   const [actionId, setActionId] = useState("");
+  const [editingToken, setEditingToken] = useState<TokenItem | null>(null);
+  const [editTokenValue, setEditTokenValue] = useState("");
+  const [savingToken, setSavingToken] = useState(false);
 
   const requestedSiteId = useMemo(
     () => parsePositiveInt(new URLSearchParams(location.search).get("siteId")),
@@ -188,14 +197,20 @@ export default function LiteKeys() {
     [sessionAccounts, tokenMap],
   );
 
+  const pendingTokenCount = useMemo(
+    () => visibleTokenRows.filter(({ token }) => isMaskedPendingToken(token)).length,
+    [visibleTokenRows],
+  );
+
   const summary = useMemo(() => {
     return {
       sessionAccounts: sessionAccounts.length,
       unsynced: unsyncedSessionAccounts.length,
       tokens: visibleTokenRows.length,
+      pending: pendingTokenCount,
       directApiKeys: apiKeyAccounts.length,
     };
-  }, [apiKeyAccounts.length, sessionAccounts.length, unsyncedSessionAccounts.length, visibleTokenRows.length]);
+  }, [apiKeyAccounts.length, pendingTokenCount, sessionAccounts.length, unsyncedSessionAccounts.length, visibleTokenRows.length]);
 
   const syncTokens = async (account: AccountItem) => {
     setActionId(`sync-${account.id}`);
@@ -257,10 +272,47 @@ export default function LiteKeys() {
     }
   };
 
+  const openCompleteToken = (token: TokenItem) => {
+    setEditingToken(token);
+    setEditTokenValue("");
+  };
+
+  const closeCompleteToken = () => {
+    setEditingToken(null);
+    setEditTokenValue("");
+    setSavingToken(false);
+  };
+
+  const saveCompleteToken = async () => {
+    if (!editingToken) return;
+    const tokenValue = editTokenValue.trim();
+    if (!tokenValue) {
+      toast.error("请粘贴完整明文 key");
+      return;
+    }
+
+    setSavingToken(true);
+    try {
+      await api.updateAccountToken(editingToken.id, {
+        token: tokenValue,
+        enabled: true,
+        isDefault: editingToken.isDefault,
+      });
+      toast.success("完整 key 已保存");
+      closeCompleteToken();
+      await load();
+    } catch (error: any) {
+      toast.error(error?.message || "保存完整 key 失败");
+    } finally {
+      setSavingToken(false);
+    }
+  };
+
   const summaryCards = [
     { label: "Session 账户", value: summary.sessionAccounts, tone: "badge-info" },
     { label: "待同步账户", value: summary.unsynced, tone: "badge-warning" },
     { label: "已同步 key", value: summary.tokens, tone: "badge-success" },
+    { label: "待补全 key", value: summary.pending, tone: "badge-warning" },
     { label: "直连 API Key", value: summary.directApiKeys, tone: "badge-muted" },
   ];
 
@@ -415,57 +467,70 @@ export default function LiteKeys() {
               <div className="card" style={{ padding: 0, boxShadow: "none", border: "1px solid var(--color-border)" }}>
                 {isMobile ? (
                   <div className="mobile-card-list" style={{ padding: 12 }}>
-                    {visibleTokenRows.map(({ account, token }) => (
-                      <MobileCard
-                        key={token.id}
-                        title={token.name || "未命名 key"}
-                        headerActions={(
-                          <span className={`badge ${token.isDefault ? "badge-warning" : token.enabled ? "badge-success" : "badge-muted"}`} style={{ fontSize: 11 }}>
-                            {token.isDefault ? "默认" : token.enabled ? "可用" : "停用"}
-                          </span>
-                        )}
-                        footerActions={(
-                          <>
-                            <button
-                              type="button"
-                              className="btn btn-link"
-                              onClick={() => void copyTokenValue(token.id)}
-                              disabled={actionId === `copy-token-${token.id}`}
-                            >
-                              复制
-                            </button>
-                            {!token.isDefault ? (
+                    {visibleTokenRows.map(({ account, token }) => {
+                      const isPending = isMaskedPendingToken(token);
+                      return (
+                        <MobileCard
+                          key={token.id}
+                          title={token.name || "未命名 key"}
+                          headerActions={(
+                            <span className={`badge ${isPending ? "badge-warning" : token.isDefault ? "badge-warning" : token.enabled ? "badge-success" : "badge-muted"}`} style={{ fontSize: 11 }}>
+                              {isPending ? "待补全" : token.isDefault ? "默认" : token.enabled ? "可用" : "停用"}
+                            </span>
+                          )}
+                          footerActions={(
+                            <>
+                              {isPending ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-link"
+                                  onClick={() => openCompleteToken(token)}
+                                >
+                                  补全
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn btn-link"
+                                  onClick={() => void copyTokenValue(token.id)}
+                                  disabled={actionId === `copy-token-${token.id}`}
+                                >
+                                  复制
+                                </button>
+                              )}
+                              {!isPending && !token.isDefault ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-link"
+                                  onClick={() => void setDefaultToken(token.id)}
+                                  disabled={actionId === `default-${token.id}`}
+                                >
+                                  设默认
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 className="btn btn-link"
-                                onClick={() => void setDefaultToken(token.id)}
-                                disabled={actionId === `default-${token.id}`}
+                                onClick={() => void syncTokens(account)}
+                                disabled={actionId === `sync-${account.id}`}
                               >
-                                设默认
+                                同步
                               </button>
-                            ) : null}
-                            <button
-                              type="button"
-                              className="btn btn-link"
-                              onClick={() => void syncTokens(account)}
-                              disabled={actionId === `sync-${account.id}`}
-                            >
-                              同步
-                            </button>
-                          </>
-                        )}
-                      >
-                        <MobileField label="站点" value={account.site?.name || "-"} />
-                        <MobileField label="账户" value={resolveAccountName(account)} />
-                        <MobileField
-                          label="Key"
-                          stacked
-                          value={<span style={monoTextStyle}>{token.tokenMasked || "-"}</span>}
-                        />
-                        <MobileField label="分组" value={token.tokenGroup || "default"} />
-                        <MobileField label="更新时间" value={formatDateTimeLocal(token.updatedAt)} />
-                      </MobileCard>
-                    ))}
+                            </>
+                          )}
+                        >
+                          <MobileField label="站点" value={account.site?.name || "-"} />
+                          <MobileField label="账户" value={resolveAccountName(account)} />
+                          <MobileField
+                            label="Key"
+                            stacked
+                            value={<span style={monoTextStyle}>{token.tokenMasked || "-"}</span>}
+                          />
+                          <MobileField label="分组" value={token.tokenGroup || "default"} />
+                          <MobileField label="更新时间" value={formatDateTimeLocal(token.updatedAt)} />
+                        </MobileCard>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div style={{ overflowX: "auto" }}>
@@ -483,55 +548,68 @@ export default function LiteKeys() {
                         </tr>
                       </thead>
                       <tbody>
-                        {visibleTokenRows.map(({ account, token }) => (
-                          <tr key={token.id}>
-                            <td>{account.site?.name || "-"}</td>
-                            <td style={{ fontWeight: 600 }}>{resolveAccountName(account)}</td>
-                            <td>{token.name || "未命名 key"}</td>
-                            <td>
-                              <span style={monoTextStyle}>{token.tokenMasked || "-"}</span>
-                            </td>
-                            <td>{token.tokenGroup || "default"}</td>
-                            <td>
-                              <span className={`badge ${token.isDefault ? "badge-warning" : token.enabled ? "badge-success" : "badge-muted"}`}>
-                                {token.isDefault ? "默认" : token.enabled ? "可用" : "停用"}
-                              </span>
-                            </td>
-                            <td style={{ whiteSpace: "nowrap", color: "var(--color-text-muted)" }}>
-                              {formatDateTimeLocal(token.updatedAt)}
-                            </td>
-                            <td style={{ textAlign: "right" }}>
-                              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-                                <button
-                                  type="button"
-                                  className="btn btn-link"
-                                  onClick={() => void copyTokenValue(token.id)}
-                                  disabled={actionId === `copy-token-${token.id}`}
-                                >
-                                  {actionId === `copy-token-${token.id}` ? "复制中..." : "复制"}
-                                </button>
-                                {!token.isDefault ? (
+                        {visibleTokenRows.map(({ account, token }) => {
+                          const isPending = isMaskedPendingToken(token);
+                          return (
+                            <tr key={token.id}>
+                              <td>{account.site?.name || "-"}</td>
+                              <td style={{ fontWeight: 600 }}>{resolveAccountName(account)}</td>
+                              <td>{token.name || "未命名 key"}</td>
+                              <td>
+                                <span style={monoTextStyle}>{token.tokenMasked || "-"}</span>
+                              </td>
+                              <td>{token.tokenGroup || "default"}</td>
+                              <td>
+                                <span className={`badge ${isPending ? "badge-warning" : token.isDefault ? "badge-warning" : token.enabled ? "badge-success" : "badge-muted"}`}>
+                                  {isPending ? "待补全" : token.isDefault ? "默认" : token.enabled ? "可用" : "停用"}
+                                </span>
+                              </td>
+                              <td style={{ whiteSpace: "nowrap", color: "var(--color-text-muted)" }}>
+                                {formatDateTimeLocal(token.updatedAt)}
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                                  {isPending ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-link"
+                                      onClick={() => openCompleteToken(token)}
+                                    >
+                                      补全
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="btn btn-link"
+                                      onClick={() => void copyTokenValue(token.id)}
+                                      disabled={actionId === `copy-token-${token.id}`}
+                                    >
+                                      {actionId === `copy-token-${token.id}` ? "复制中..." : "复制"}
+                                    </button>
+                                  )}
+                                  {!isPending && !token.isDefault ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-link"
+                                      onClick={() => void setDefaultToken(token.id)}
+                                      disabled={actionId === `default-${token.id}`}
+                                    >
+                                      {actionId === `default-${token.id}` ? "处理中..." : "设默认"}
+                                    </button>
+                                  ) : null}
                                   <button
                                     type="button"
                                     className="btn btn-link"
-                                    onClick={() => void setDefaultToken(token.id)}
-                                    disabled={actionId === `default-${token.id}`}
+                                    onClick={() => void syncTokens(account)}
+                                    disabled={actionId === `sync-${account.id}`}
                                   >
-                                    {actionId === `default-${token.id}` ? "处理中..." : "设默认"}
+                                    {actionId === `sync-${account.id}` ? "同步中..." : "同步所属账户"}
                                   </button>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  className="btn btn-link"
-                                  onClick={() => void syncTokens(account)}
-                                  disabled={actionId === `sync-${account.id}`}
-                                >
-                                  {actionId === `sync-${account.id}` ? "同步中..." : "同步所属账户"}
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -630,6 +708,44 @@ export default function LiteKeys() {
           </>
         )}
       </div>
+
+      {editingToken ? (
+        <CenteredModal
+          open
+          title="补全完整 key"
+          onClose={closeCompleteToken}
+          maxWidth={520}
+          footer={(
+            <>
+              <button type="button" className="btn btn-ghost" onClick={closeCompleteToken} disabled={savingToken}>
+                取消
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => void saveCompleteToken()} disabled={savingToken}>
+                {savingToken ? "保存中..." : "保存完整 key"}
+              </button>
+            </>
+          )}
+        >
+          <div style={{ display: "grid", gap: 12 }}>
+            <div className="alert alert-warning">
+              当前本地只有上游返回的脱敏值：
+              <span style={{ ...monoTextStyle, marginLeft: 6 }}>{editingToken.tokenMasked || "-"}</span>
+              。请从上游站点复制完整 key，或重新生成后粘贴到这里。
+            </div>
+            <label>
+              <div style={fieldLabelStyle}>完整明文 key</div>
+              <input
+                type="password"
+                value={editTokenValue}
+                onChange={(event) => setEditTokenValue(event.target.value)}
+                placeholder="粘贴完整 key，例如 sk-..."
+                style={inputStyle}
+                autoFocus
+              />
+            </label>
+          </div>
+        </CenteredModal>
+      ) : null}
     </div>
   );
 }

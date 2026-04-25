@@ -1,4 +1,4 @@
-import { ApiTokenInfo, BasePlatformAdapter, CheckinResult, BalanceInfo, UserInfo, TokenVerifyResult, CreateApiTokenOptions, type SiteAnnouncement } from './base.js';
+import { ApiTokenInfo, BasePlatformAdapter, CheckinResult, BalanceInfo, UserInfo, TokenVerifyResult, CreateApiTokenOptions, type CreateApiTokenResult, type SiteAnnouncement } from './base.js';
 import type { RequestInit as UndiciRequestInit } from 'undici';
 import { createContext, runInContext } from 'node:vm';
 import { withSiteProxyRequestInit } from '../siteProxy.js';
@@ -1267,9 +1267,15 @@ export class NewApiAdapter extends BasePlatformAdapter {
     accessToken: string,
     platformUserId?: number,
     options?: CreateApiTokenOptions,
-  ): Promise<boolean> {
+  ): Promise<CreateApiTokenResult> {
     const payload = JSON.stringify(this.buildDefaultTokenPayload(options));
     const resolvedUserId = platformUserId || await this.discoverUserId(baseUrl, accessToken);
+    const normalizeCreatedToken = (res: any): CreateApiTokenResult => {
+      if (!res?.success) return false;
+      const items = this.normalizeTokenItems(this.parseTokenItems(res));
+      const direct = this.normalizeTokenItems([res?.data, res?.token, res]).find((item) => item.key);
+      return items.find((item) => item.key) || direct || true;
+    };
 
     try {
       const res = await this.fetchJson<any>(`${baseUrl}/api/token/`, {
@@ -1277,7 +1283,8 @@ export class NewApiAdapter extends BasePlatformAdapter {
         headers: this.authHeaders(accessToken, resolvedUserId || undefined),
         body: payload,
       });
-      if (res?.success) return true;
+      const createdToken = normalizeCreatedToken(res);
+      if (createdToken) return createdToken;
     } catch {}
 
     const cookieUserId = resolvedUserId || await this.probeUserIdByCookie(baseUrl, accessToken);
@@ -1290,7 +1297,8 @@ export class NewApiAdapter extends BasePlatformAdapter {
           headers,
           body: payload,
         });
-        if (res?.success) return true;
+        const createdToken = normalizeCreatedToken(res);
+        if (createdToken) return createdToken;
       } catch {}
     }
 

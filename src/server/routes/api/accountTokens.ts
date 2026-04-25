@@ -1,4 +1,4 @@
-﻿import { FastifyInstance } from 'fastify';
+import { FastifyInstance } from 'fastify';
 import { and, eq } from 'drizzle-orm';
 import { db, schema } from '../../db/index.js';
 import { insertAndGetById } from '../../db/insertHelpers.js';
@@ -171,6 +171,23 @@ function parseExpiredTime(value: unknown): number | undefined {
   if (!Number.isFinite(parsedMs)) return undefined;
   const seconds = Math.trunc(parsedMs / 1000);
   return seconds > 0 ? seconds : undefined;
+}
+
+function normalizeCreatedApiTokenResult(
+  result: unknown,
+  fallbackName?: string | null,
+  fallbackGroup?: string | null,
+): { name?: string | null; key: string; enabled?: boolean | null; tokenGroup?: string | null } | null {
+  if (!result || typeof result !== 'object') return null;
+  const token = result as { name?: unknown; key?: unknown; enabled?: unknown; tokenGroup?: unknown };
+  const key = asTrimmedString(token.key);
+  if (!key || isMaskedTokenValue(key)) return null;
+  return {
+    name: asTrimmedString(token.name) || asTrimmedString(fallbackName) || 'default',
+    key,
+    enabled: parseOptionalBoolean(token.enabled) ?? true,
+    tokenGroup: asTrimmedString(token.tokenGroup) || asTrimmedString(fallbackGroup) || null,
+  };
 }
 
 function normalizeBatchIds(input: unknown): number[] {
@@ -592,26 +609,42 @@ export async function accountTokensRoutes(app: FastifyInstance) {
     }
 
     const platformUserId = resolvePlatformUserId(account.extraConfig, account.username);
+    const createOptions = {
+      name: asTrimmedString(body.name),
+      group: asTrimmedString(body.group),
+      unlimitedQuota,
+      remainQuota,
+      expiredTime,
+      allowIps: asTrimmedString(body.allowIps),
+      modelLimitsEnabled,
+      modelLimits: asTrimmedString(body.modelLimits),
+    };
     const createdViaUpstream = await withAccountProxyOverride(
       getProxyUrlFromExtraConfig(account.extraConfig),
       () => adapter.createApiToken(
         site.url,
         account.accessToken,
         platformUserId,
-        {
-          name: asTrimmedString(body.name),
-          group: asTrimmedString(body.group),
-          unlimitedQuota,
-          remainQuota,
-          expiredTime,
-          allowIps: asTrimmedString(body.allowIps),
-          modelLimitsEnabled,
-          modelLimits: asTrimmedString(body.modelLimits),
-        },
+        createOptions,
       ),
     );
     if (!createdViaUpstream) {
       return reply.code(502).send({ success: false, message: '站点创建令牌失败' });
+    }
+
+    const createdPlainToken = normalizeCreatedApiTokenResult(
+      createdViaUpstream,
+      createOptions.name,
+      createOptions.group,
+    );
+    if (createdPlainToken) {
+      await convergeAccountMutation({
+        accountId: account.id,
+        preferredApiToken: createdPlainToken.key,
+        defaultTokenSource: 'created',
+        ensurePreferredTokenBeforeSync: true,
+        upstreamTokens: [createdPlainToken],
+      });
     }
 
     const syncResult = await executeAccountTokenSync(row);

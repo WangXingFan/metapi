@@ -90,6 +90,8 @@ export interface CreateApiTokenOptions {
   modelLimits?: string;
 }
 
+export type CreateApiTokenResult = boolean | ApiTokenInfo | null;
+
 export interface PlatformAdapter {
   readonly platformName: string;
   detect(url: string): Promise<boolean>;
@@ -103,7 +105,7 @@ export interface PlatformAdapter {
   getApiTokens(baseUrl: string, accessToken: string, platformUserId?: number): Promise<ApiTokenInfo[]>;
   getSiteAnnouncements(baseUrl: string, accessToken: string, platformUserId?: number): Promise<SiteAnnouncement[]>;
   getUserGroups(baseUrl: string, accessToken: string, platformUserId?: number): Promise<string[]>;
-  createApiToken(baseUrl: string, accessToken: string, platformUserId?: number, options?: CreateApiTokenOptions): Promise<boolean>;
+  createApiToken(baseUrl: string, accessToken: string, platformUserId?: number, options?: CreateApiTokenOptions): Promise<CreateApiTokenResult>;
   deleteApiToken(baseUrl: string, accessToken: string, tokenKey: string, platformUserId?: number): Promise<boolean>;
 }
 
@@ -198,7 +200,7 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
     _accessToken: string,
     _platformUserId?: number,
     _options?: CreateApiTokenOptions,
-  ): Promise<boolean> {
+  ): Promise<CreateApiTokenResult> {
     return false;
   }
 
