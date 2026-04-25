@@ -9,6 +9,7 @@ import {
   getSpreadCheckinStatus,
   isSpreadCheckinActive,
   startSpreadCheckinNow,
+  stopSpreadCheckinToday,
   updateCheckinSchedule,
 } from '../../services/checkinScheduler.js';
 import { startBackgroundTask } from '../../services/backgroundTaskService.js';
@@ -73,19 +74,24 @@ export async function checkinRoutes(app: FastifyInstance) {
   app.get('/api/checkin/status', async () => getSpreadCheckinStatus());
 
   app.post('/api/checkin/stop', async () => {
-    updateCheckinSchedule({
-      mode: 'cron',
-      cronExpr: CHECKIN_SPREAD_START_CRON,
-      intervalHours: config.checkinIntervalHours,
-      spreadIntervalMinutes: config.checkinSpreadIntervalMinutes,
-    });
+    if (config.checkinScheduleMode !== 'spread' || config.checkinCron !== CHECKIN_SPREAD_START_CRON) {
+      updateCheckinSchedule({
+        mode: 'spread',
+        cronExpr: CHECKIN_SPREAD_START_CRON,
+        intervalHours: config.checkinIntervalHours,
+        spreadIntervalMinutes: config.checkinSpreadIntervalMinutes,
+      });
+    }
+    stopSpreadCheckinToday();
     await upsertSetting('checkin_cron', CHECKIN_SPREAD_START_CRON);
-    await upsertSetting('checkin_schedule_mode', 'cron');
+    await upsertSetting('checkin_schedule_mode', 'spread');
     await upsertSetting('checkin_spread_interval_minutes', config.checkinSpreadIntervalMinutes);
     return {
       success: true,
       status: 'stopped',
-      message: '已停止错峰签到队列',
+      mode: 'spread',
+      cron: CHECKIN_SPREAD_START_CRON,
+      message: '已停止今天的错峰签到队列，明天 8:00 将继续错峰签到',
     };
   });
 

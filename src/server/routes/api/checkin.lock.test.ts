@@ -6,6 +6,7 @@ const checkinAccountMock = vi.fn();
 const getSpreadCheckinStatusMock = vi.fn();
 const isSpreadCheckinActiveMock = vi.fn();
 const startSpreadCheckinNowMock = vi.fn();
+const stopSpreadCheckinTodayMock = vi.fn();
 
 vi.mock('../../services/checkinService.js', () => ({
   checkinAll: (...args: unknown[]) => checkinAllMock(...args),
@@ -17,6 +18,7 @@ vi.mock('../../services/checkinScheduler.js', () => ({
   getSpreadCheckinStatus: (...args: unknown[]) => getSpreadCheckinStatusMock(...args),
   isSpreadCheckinActive: (...args: unknown[]) => isSpreadCheckinActiveMock(...args),
   startSpreadCheckinNow: (...args: unknown[]) => startSpreadCheckinNowMock(...args),
+  stopSpreadCheckinToday: (...args: unknown[]) => stopSpreadCheckinTodayMock(...args),
   updateCheckinSchedule: vi.fn(),
 }));
 
@@ -60,6 +62,7 @@ describe('POST /api/checkin/trigger background task dedupe', () => {
     getSpreadCheckinStatusMock.mockReset();
     isSpreadCheckinActiveMock.mockReset();
     startSpreadCheckinNowMock.mockReset();
+    stopSpreadCheckinTodayMock.mockReset();
     checkinAccountMock.mockResolvedValue({ success: true, message: 'ok' });
     getSpreadCheckinStatusMock.mockResolvedValue({
       mode: 'spread',
@@ -129,6 +132,33 @@ describe('POST /api/checkin/trigger background task dedupe', () => {
       message: '错峰签到队列执行中，请稍后查看签到日志',
     }));
     expect(startSpreadCheckinNowMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('stops only today spread queue and keeps tomorrow 08:00 spread schedule', async () => {
+    const { config } = await import('../../config.js');
+    const originalMode = config.checkinScheduleMode;
+    const originalCron = config.checkinCron;
+    config.checkinScheduleMode = 'spread';
+    config.checkinCron = '0 8 * * *';
+    const { checkinRoutes } = await import('./checkin.js');
+    const schedulerModule = await import('../../services/checkinScheduler.js');
+    const app = Fastify();
+    await app.register(checkinRoutes);
+
+    const response = await app.inject({ method: 'POST', url: '/api/checkin/stop' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(expect.objectContaining({
+      success: true,
+      status: 'stopped',
+      mode: 'spread',
+      cron: '0 8 * * *',
+    }));
+    expect(stopSpreadCheckinTodayMock).toHaveBeenCalledTimes(1);
+    expect((schedulerModule as any).updateCheckinSchedule).not.toHaveBeenCalled();
+    config.checkinScheduleMode = originalMode;
+    config.checkinCron = originalCron;
     await app.close();
   });
 

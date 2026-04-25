@@ -138,6 +138,42 @@ describe('checkinScheduler', () => {
     ], now, attemptState, 0.99)).toBe(5);
   });
 
+  it('stops only the current local day spread queue and allows the next day cron to start again', async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    vi.setSystemTime(new Date(2026, 2, 20, 8, 0, 0, 0));
+    const scheduler = await import('./checkinScheduler.js');
+    scheduler.updateCheckinSchedule({
+      mode: 'spread',
+      cronExpr: '0 8 * * *',
+      intervalHours: 6,
+      spreadIntervalMinutes: 5,
+    });
+    selectRowsMock.mockReturnValue([
+      { accounts: { id: 1, checkinEnabled: true, status: 'active', lastCheckinAt: null }, sites: { id: 10, status: 'active' } },
+    ]);
+    allMock.mockResolvedValue([{ accountId: 1, result: { success: true, status: 'success', message: 'ok' } }]);
+
+    await scheduler.startSpreadCheckinNow();
+    expect(scheduler.isSpreadCheckinActive()).toBe(true);
+
+    scheduler.stopSpreadCheckinToday();
+    expect(scheduler.isSpreadCheckinActive()).toBe(false);
+    const timeoutCountAfterStop = setTimeoutSpy.mock.calls.length;
+
+    await scheduler.startSpreadCheckinNow();
+    expect(setTimeoutSpy.mock.calls.length).toBe(timeoutCountAfterStop);
+    expect(scheduler.isSpreadCheckinActive()).toBe(false);
+
+    vi.setSystemTime(new Date(2026, 2, 21, 8, 0, 0, 0));
+    selectRowsMock.mockReturnValue([
+      { accounts: { id: 2, checkinEnabled: true, status: 'active', lastCheckinAt: null }, sites: { id: 10, status: 'active' } },
+    ]);
+    allMock.mockResolvedValue([{ accountId: 2, result: { success: true, status: 'success', message: 'ok' } }]);
+
+    await scheduler.startSpreadCheckinNow();
+    expect(scheduler.isSpreadCheckinActive()).toBe(true);
+  });
+
   it('reports spread checkin progress from eligible accounts and today attempts', async () => {
     vi.setSystemTime(new Date(2026, 2, 20, 8, 0, 0, 0));
     const scheduler = await import('./checkinScheduler.js');

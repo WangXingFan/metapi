@@ -28,6 +28,7 @@ let spreadCheckinRunning = false;
 let spreadActiveDayKey: string | null = null;
 let spreadNextRunAt: string | null = null;
 let spreadCurrentAccountId: number | null = null;
+let spreadStoppedDayKey: string | null = null;
 let spreadLastAccountId: number | null = null;
 let spreadLastResult: {
   accountId: number;
@@ -210,6 +211,7 @@ function clearSpreadCheckinTimer() {
 function scheduleNextSpreadCheckinStep(dayKey: string | null = spreadActiveDayKey) {
   if (config.checkinScheduleMode !== 'spread') return;
   if (!dayKey) return;
+  if (spreadStoppedDayKey === dayKey) return;
   clearSpreadCheckinTimer();
   const delayMs = Math.max(1, config.checkinSpreadIntervalMinutes) * 60 * 1000;
   spreadNextRunAt = new Date(Date.now() + delayMs).toISOString();
@@ -221,9 +223,16 @@ function scheduleNextSpreadCheckinStep(dayKey: string | null = spreadActiveDayKe
 }
 
 async function runSpreadCheckinStep(now = new Date(), scheduleNext = false, dayKey = formatLocalDate(now)) {
-  if (formatLocalDate(now) !== dayKey) {
+  const currentDayKey = formatLocalDate(now);
+  if (spreadStoppedDayKey && currentDayKey !== spreadStoppedDayKey) spreadStoppedDayKey = null;
+  if (currentDayKey !== dayKey) {
     if (spreadActiveDayKey === dayKey) spreadActiveDayKey = null;
     clearSpreadCheckinTimer();
+    return;
+  }
+  if (spreadStoppedDayKey === dayKey) {
+    clearSpreadCheckinTimer();
+    if (spreadActiveDayKey === dayKey) spreadActiveDayKey = null;
     return;
   }
   spreadActiveDayKey = dayKey;
@@ -307,7 +316,15 @@ function createSpreadCheckinTask(cronExpr: string) {
 
 export function isSpreadCheckinActive(now = new Date()) {
   const dayKey = formatLocalDate(now);
-  return spreadActiveDayKey === dayKey && (spreadCheckinRunning || spreadCheckinTimer !== null);
+  return spreadStoppedDayKey !== dayKey && spreadActiveDayKey === dayKey && (spreadCheckinRunning || spreadCheckinTimer !== null);
+}
+
+export function stopSpreadCheckinToday(now = new Date()) {
+  const dayKey = formatLocalDate(now);
+  spreadStoppedDayKey = dayKey;
+  clearSpreadCheckinTimer();
+  if (spreadActiveDayKey === dayKey) spreadActiveDayKey = null;
+  spreadCurrentAccountId = null;
 }
 
 type SpreadCheckinStatusAccount = {
@@ -628,6 +645,7 @@ export function __resetCheckinSchedulerForTests() {
   spreadActiveDayKey = null;
   spreadNextRunAt = null;
   spreadCurrentAccountId = null;
+  spreadStoppedDayKey = null;
   spreadLastAccountId = null;
   spreadLastResult = null;
 }
