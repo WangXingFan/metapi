@@ -26,6 +26,16 @@ const intervalAttemptByAccount = new Map<number, number>();
 const spreadAttemptDayByAccount = new Map<number, string>();
 let spreadCheckinRunning = false;
 let spreadActiveDayKey: string | null = null;
+let spreadNextRunAt: string | null = null;
+let spreadCurrentAccountId: number | null = null;
+let spreadLastAccountId: number | null = null;
+let spreadLastResult: {
+  accountId: number;
+  success: boolean;
+  status?: string | null;
+  message?: string | null;
+  completedAt: string;
+} | null = null;
 
 const DAILY_SUMMARY_DEFAULT_CRON = '58 23 * * *';
 const LOG_CLEANUP_DEFAULT_CRON = '0 6 * * *';
@@ -190,9 +200,11 @@ export function selectSpreadCheckinAccountId(
 }
 
 function clearSpreadCheckinTimer() {
-  if (!spreadCheckinTimer) return;
-  clearTimeout(spreadCheckinTimer);
+  if (spreadCheckinTimer) {
+    clearTimeout(spreadCheckinTimer);
+  }
   spreadCheckinTimer = null;
+  spreadNextRunAt = null;
 }
 
 function scheduleNextSpreadCheckinStep(dayKey: string | null = spreadActiveDayKey) {
@@ -200,8 +212,10 @@ function scheduleNextSpreadCheckinStep(dayKey: string | null = spreadActiveDayKe
   if (!dayKey) return;
   clearSpreadCheckinTimer();
   const delayMs = Math.max(1, config.checkinSpreadIntervalMinutes) * 60 * 1000;
+  spreadNextRunAt = new Date(Date.now() + delayMs).toISOString();
   spreadCheckinTimer = setTimeout(() => {
     spreadCheckinTimer = null;
+    spreadNextRunAt = null;
     void runSpreadCheckinStep(new Date(), true, dayKey);
   }, delayMs);
 }
@@ -244,16 +258,27 @@ async function runSpreadCheckinStep(now = new Date(), scheduleNext = false, dayK
 
     if (!accountId) {
       clearSpreadCheckinTimer();
+      spreadCurrentAccountId = null;
       if (spreadActiveDayKey === dayKey) spreadActiveDayKey = null;
       console.log('[Scheduler] Spread check-in complete: no due accounts');
       return;
     }
 
+    spreadCurrentAccountId = accountId;
     const results = await checkinAll({
       accountIds: [accountId],
       scheduleMode: 'spread',
     });
     spreadAttemptDayByAccount.set(accountId, dayKey);
+    const result = results.find((item) => item.accountId === accountId)?.result;
+    spreadLastAccountId = accountId;
+    spreadLastResult = {
+      accountId,
+      success: result?.success === true,
+      status: typeof result?.status === 'string' ? result.status : null,
+      message: typeof result?.message === 'string' ? result.message : null,
+      completedAt: new Date().toISOString(),
+    };
     const success = results.filter((r) => r.result.success).length;
     const failed = results.length - success;
     console.log(`[Scheduler] Spread check-in account ${accountId}: ${success} success, ${failed} failed`);
@@ -266,6 +291,7 @@ async function runSpreadCheckinStep(now = new Date(), scheduleNext = false, dayK
       scheduleNextSpreadCheckinStep(dayKey);
     }
   } finally {
+    spreadCurrentAccountId = null;
     spreadCheckinRunning = false;
   }
 }
@@ -284,6 +310,81 @@ export function isSpreadCheckinActive(now = new Date()) {
   return spreadActiveDayKey === dayKey && (spreadCheckinRunning || spreadCheckinTimer !== null);
 }
 
+type SpreadCheckinStatusAccount = {
+  id: number;
+  username: string | null;
+  siteId: number | null;
+  siteName: string | null;
+  lastCheckinAt: string | null;
+};
+
+function toSpreadCheckinStatusAccount(row: any): SpreadCheckinStatusAccount {
+  return {
+    id: row.accounts.id,
+    username: row.accounts.username ?? null,
+    siteId: row.sites?.id ?? null,
+    siteName: row.sites?.name ?? null,
+    lastCheckinAt: row.accounts.lastCheckinAt ?? null,
+  };
+}
+
+function isSpreadCheckinEligibleRow(row: any): boolean {
+  return (
+    row.accounts?.checkinEnabled === true
+    && row.accounts?.status === 'active'
+    && row.sites?.status !== 'disabled'
+  );
+}
+
+export async function getSpreadCheckinStatus(now = new Date()) {
+  const dayKey = formatLocalDate(now);
+  const rows = await db
+    .select()
+    .from(schema.accounts)
+    .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
+    .all();
+
+  const eligibleAccounts = rows
+    .filter(isSpreadCheckinEligibleRow)
+    .map(toSpreadCheckinStatusAccount);
+  const completedAccounts = eligibleAccounts.filter((account) => (
+    toLocalDayKeyFromStoredUtc(account.lastCheckinAt) === dayKey
+    || spreadAttemptDayByAccount.get(account.id) === dayKey
+  ));
+  const completedAccountIds = new Set(completedAccounts.map((account) => account.id));
+  const pendingAccounts = eligibleAccounts.filter((account) => !completedAccountIds.has(account.id));
+  const active = spreadActiveDayKey === dayKey && (spreadCheckinRunning || spreadCheckinTimer !== null);
+  const currentAccount = spreadCurrentAccountId == null
+    ? null
+    : eligibleAccounts.find((account) => account.id === spreadCurrentAccountId) ?? null;
+  const lastResultToday = spreadLastResult && formatLocalDate(new Date(spreadLastResult.completedAt)) === dayKey
+    ? spreadLastResult
+    : null;
+  const lastAccount = spreadLastAccountId == null || !lastResultToday
+    ? null
+    : eligibleAccounts.find((account) => account.id === spreadLastAccountId) ?? null;
+  const completedCount = completedAccounts.length;
+  const eligibleCount = eligibleAccounts.length;
+
+  return {
+    mode: config.checkinScheduleMode as CheckinScheduleMode,
+    active,
+    running: spreadCheckinRunning,
+    waiting: active && !spreadCheckinRunning && spreadCheckinTimer !== null,
+    dayKey,
+    activeDayKey: spreadActiveDayKey,
+    intervalMinutes: config.checkinSpreadIntervalMinutes,
+    nextRunAt: active ? spreadNextRunAt : null,
+    currentAccount,
+    lastAccount,
+    lastResult: lastResultToday,
+    eligibleCount,
+    completedCount,
+    pendingCount: pendingAccounts.length,
+    progressPercent: eligibleCount > 0 ? Math.round((completedCount / eligibleCount) * 100) : 0,
+  };
+}
+
 export async function startSpreadCheckinNow(now = new Date()) {
   if (isSpreadCheckinActive(now)) {
     return { started: false, reused: true };
@@ -297,6 +398,7 @@ export async function startSpreadCheckinNow(now = new Date()) {
     });
   }
   clearSpreadCheckinTimer();
+  spreadNextRunAt = null;
   await runSpreadCheckinStep(now, true, formatLocalDate(now));
   return { started: true, reused: false };
 }
@@ -310,6 +412,7 @@ function stopCheckinSchedule() {
   }
   clearSpreadCheckinTimer();
   spreadActiveDayKey = null;
+  spreadCurrentAccountId = null;
 }
 
 function startCheckinSchedule(options: { resumeSpreadToday?: boolean } = {}) {
@@ -523,4 +626,8 @@ export function __resetCheckinSchedulerForTests() {
   spreadAttemptDayByAccount.clear();
   spreadCheckinRunning = false;
   spreadActiveDayKey = null;
+  spreadNextRunAt = null;
+  spreadCurrentAccountId = null;
+  spreadLastAccountId = null;
+  spreadLastResult = null;
 }

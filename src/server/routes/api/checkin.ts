@@ -6,6 +6,7 @@ import { eq, desc } from 'drizzle-orm';
 import { checkinAccount } from '../../services/checkinService.js';
 import {
   CHECKIN_SPREAD_START_CRON,
+  getSpreadCheckinStatus,
   isSpreadCheckinActive,
   startSpreadCheckinNow,
   updateCheckinSchedule,
@@ -68,6 +69,8 @@ export async function checkinRoutes(app: FastifyInstance) {
         : `已开始错峰签到，每 ${config.checkinSpreadIntervalMinutes} 分钟随机签到 1 个账号`,
     });
   });
+
+  app.get('/api/checkin/status', async () => getSpreadCheckinStatus());
 
   app.post('/api/checkin/stop', async () => {
     updateCheckinSchedule({

@@ -903,6 +903,8 @@ export const api = {
   // Check-in
   triggerCheckinAll: () => request("/api/checkin/trigger", { method: "POST" }),
   triggerSpreadCheckin: () => request("/api/checkin/trigger", { method: "POST" }),
+  stopSpreadCheckin: () => request("/api/checkin/stop", { method: "POST" }),
+  getCheckinStatus: () => request("/api/checkin/status"),
   triggerCheckin: (id: number) =>
     request(`/api/checkin/trigger/${id}`, { method: "POST" }),
   getCheckinLogs: (params?: string) =>

@@ -5,6 +5,7 @@ const scheduleMock = vi.fn(() => ({
   stop: cronStopMock,
 }));
 const validateMock = vi.fn(() => true);
+const selectRowsMock = vi.fn(() => []);
 const allMock = vi.fn();
 
 vi.mock('node-cron', () => ({
@@ -18,7 +19,7 @@ vi.mock('../db/index.js', () => {
   const queryChain = {
     where: () => queryChain,
     get: () => undefined,
-    all: () => [],
+    all: () => selectRowsMock(),
     from: () => queryChain,
     innerJoin: () => queryChain,
   };
@@ -52,6 +53,8 @@ describe('checkinScheduler', () => {
     cronStopMock.mockReset();
     scheduleMock.mockClear();
     validateMock.mockClear();
+    selectRowsMock.mockReset();
+    selectRowsMock.mockReturnValue([]);
     allMock.mockReset();
   });
 
@@ -133,5 +136,78 @@ describe('checkinScheduler', () => {
       { id: 4, lastCheckinAt: null, extraConfig: null },
       { id: 5, lastCheckinAt: null, extraConfig: null },
     ], now, attemptState, 0.99)).toBe(5);
+  });
+
+  it('reports spread checkin progress from eligible accounts and today attempts', async () => {
+    vi.setSystemTime(new Date(2026, 2, 20, 8, 0, 0, 0));
+    const scheduler = await import('./checkinScheduler.js');
+    scheduler.updateCheckinSchedule({
+      mode: 'spread',
+      cronExpr: '0 8 * * *',
+      intervalHours: 6,
+      spreadIntervalMinutes: 5,
+    });
+    selectRowsMock.mockReturnValue([
+      {
+        accounts: {
+          id: 1,
+          username: 'done',
+          checkinEnabled: true,
+          status: 'active',
+          lastCheckinAt: new Date(2026, 2, 20, 7, 0, 0, 0).toISOString(),
+        },
+        sites: { id: 10, name: 'Site A', status: 'active' },
+      },
+      {
+        accounts: {
+          id: 2,
+          username: 'pending',
+          checkinEnabled: true,
+          status: 'active',
+          lastCheckinAt: null,
+        },
+        sites: { id: 10, name: 'Site A', status: 'active' },
+      },
+      {
+        accounts: {
+          id: 3,
+          username: 'account-disabled',
+          checkinEnabled: true,
+          status: 'disabled',
+          lastCheckinAt: null,
+        },
+        sites: { id: 10, name: 'Site A', status: 'active' },
+      },
+      {
+        accounts: {
+          id: 4,
+          username: 'checkin-disabled',
+          checkinEnabled: false,
+          status: 'active',
+          lastCheckinAt: null,
+        },
+        sites: { id: 10, name: 'Site A', status: 'active' },
+      },
+      {
+        accounts: {
+          id: 5,
+          username: 'site-disabled',
+          checkinEnabled: true,
+          status: 'active',
+          lastCheckinAt: null,
+        },
+        sites: { id: 11, name: 'Site B', status: 'disabled' },
+      },
+    ]);
+
+    await expect(scheduler.getSpreadCheckinStatus()).resolves.toEqual(expect.objectContaining({
+      mode: 'spread',
+      active: false,
+      intervalMinutes: 5,
+      eligibleCount: 2,
+      completedCount: 1,
+      pendingCount: 1,
+      progressPercent: 50,
+    }));
   });
 });

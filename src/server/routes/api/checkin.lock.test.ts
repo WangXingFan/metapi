@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const checkinAllMock = vi.fn();
 const checkinAccountMock = vi.fn();
+const getSpreadCheckinStatusMock = vi.fn();
 const isSpreadCheckinActiveMock = vi.fn();
 const startSpreadCheckinNowMock = vi.fn();
 
@@ -13,6 +14,7 @@ vi.mock('../../services/checkinService.js', () => ({
 
 vi.mock('../../services/checkinScheduler.js', () => ({
   CHECKIN_SPREAD_START_CRON: '0 8 * * *',
+  getSpreadCheckinStatus: (...args: unknown[]) => getSpreadCheckinStatusMock(...args),
   isSpreadCheckinActive: (...args: unknown[]) => isSpreadCheckinActiveMock(...args),
   startSpreadCheckinNow: (...args: unknown[]) => startSpreadCheckinNowMock(...args),
   updateCheckinSchedule: vi.fn(),
@@ -55,9 +57,21 @@ describe('POST /api/checkin/trigger background task dedupe', () => {
   beforeEach(async () => {
     checkinAllMock.mockReset();
     checkinAccountMock.mockReset();
+    getSpreadCheckinStatusMock.mockReset();
     isSpreadCheckinActiveMock.mockReset();
     startSpreadCheckinNowMock.mockReset();
     checkinAccountMock.mockResolvedValue({ success: true, message: 'ok' });
+    getSpreadCheckinStatusMock.mockResolvedValue({
+      mode: 'spread',
+      active: false,
+      running: false,
+      waiting: false,
+      intervalMinutes: 5,
+      eligibleCount: 0,
+      completedCount: 0,
+      pendingCount: 0,
+      progressPercent: 0,
+    });
     isSpreadCheckinActiveMock.mockReturnValue(false);
     startSpreadCheckinNowMock.mockResolvedValue({ started: true, reused: false });
     const { __resetBackgroundTasksForTests } = await import('../../services/backgroundTaskService.js');
@@ -165,6 +179,40 @@ describe('POST /api/checkin/trigger background task dedupe', () => {
       intervalHours: undefined,
       spreadIntervalMinutes: 3,
     });
+    await app.close();
+  });
+
+  it('returns spread checkin queue status', async () => {
+    getSpreadCheckinStatusMock.mockResolvedValue({
+      mode: 'spread',
+      active: true,
+      running: false,
+      waiting: true,
+      intervalMinutes: 5,
+      nextRunAt: '2026-04-25T08:05:00.000Z',
+      currentAccount: null,
+      lastAccount: { id: 12, username: 'demo', siteName: 'Site' },
+      eligibleCount: 3,
+      completedCount: 1,
+      pendingCount: 2,
+      progressPercent: 33,
+    });
+    const { checkinRoutes } = await import('./checkin.js');
+    const app = Fastify();
+    await app.register(checkinRoutes);
+
+    const response = await app.inject({ method: 'GET', url: '/api/checkin/status' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(expect.objectContaining({
+      mode: 'spread',
+      active: true,
+      waiting: true,
+      completedCount: 1,
+      pendingCount: 2,
+      progressPercent: 33,
+    }));
+    expect(getSpreadCheckinStatusMock).toHaveBeenCalledTimes(1);
     await app.close();
   });
 });

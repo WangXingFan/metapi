@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
 import { MobileCard, MobileField } from "../components/MobileCard.js";
 import ResponsiveFilterPanel from "../components/ResponsiveFilterPanel.js";
@@ -18,6 +18,27 @@ type FailureReason = {
   title: string;
   actionHint: string;
   detailHint: string;
+};
+
+type CheckinQueueAccount = {
+  id: number;
+  username?: string | null;
+  siteName?: string | null;
+};
+
+type CheckinQueueStatus = {
+  mode?: "cron" | "interval" | "spread";
+  active?: boolean;
+  running?: boolean;
+  waiting?: boolean;
+  intervalMinutes?: number;
+  nextRunAt?: string | null;
+  currentAccount?: CheckinQueueAccount | null;
+  lastAccount?: CheckinQueueAccount | null;
+  eligibleCount?: number;
+  completedCount?: number;
+  pendingCount?: number;
+  progressPercent?: number;
 };
 
 function pad2(value: number) {
@@ -64,10 +85,26 @@ function parseLocalDateTimeInput(value: string): Date | null {
   return parsed;
 }
 
+function formatQueueAccount(account?: CheckinQueueAccount | null): string {
+  if (!account) return "-";
+  const username = String(account.username || "").trim() || `账号 #${account.id}`;
+  const siteName = String(account.siteName || "").trim();
+  return siteName ? `${username} @ ${siteName}` : username;
+}
+
+function clampProgressPercent(value: unknown): number {
+  const percent = Number(value);
+  if (!Number.isFinite(percent)) return 0;
+  return Math.min(100, Math.max(0, Math.round(percent)));
+}
+
 export default function CheckinLog() {
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [queueStatus, setQueueStatus] = useState<CheckinQueueStatus | null>(null);
+  const [queueStatusLoading, setQueueStatusLoading] = useState(true);
   const [filter, setFilter] = useState<LogFilter>("all");
   const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
   const [showFilters, setShowFilters] = useState(false);
@@ -150,9 +187,47 @@ export default function CheckinLog() {
     }
   };
 
+  const refreshQueueStatus = useCallback(async (showLoading = false) => {
+    if (showLoading) setQueueStatusLoading(true);
+    try {
+      const status = await api.getCheckinStatus();
+      setQueueStatus(status || null);
+      return status as CheckinQueueStatus | null;
+    } catch (e: any) {
+      toast.error(e.message || "加载错峰签到状态失败");
+      return null;
+    } finally {
+      if (showLoading) setQueueStatusLoading(false);
+    }
+  }, [toast]);
+
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async (showLoading = false) => {
+      if (showLoading) setQueueStatusLoading(true);
+      try {
+        const status = await api.getCheckinStatus();
+        if (!cancelled) setQueueStatus(status || null);
+      } catch (e: any) {
+        if (!cancelled && showLoading) toast.error(e.message || "加载错峰签到状态失败");
+      } finally {
+        if (!cancelled && showLoading) setQueueStatusLoading(false);
+      }
+    };
+
+    void refresh(true);
+    const timer = window.setInterval(() => {
+      void refresh(false);
+    }, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [toast]);
 
   const handleTriggerAll = async () => {
     setTriggering(true);
@@ -163,11 +238,24 @@ export default function CheckinLog() {
       } else {
         toast.success(res?.message || "错峰签到已启动");
       }
-      await load();
+      await Promise.all([load(), refreshQueueStatus()]);
     } catch (e: any) {
       toast.error(e.message || "触发签到失败");
     } finally {
       setTriggering(false);
+    }
+  };
+
+  const handleStopSpread = async () => {
+    setStopping(true);
+    try {
+      const res = await api.stopSpreadCheckin();
+      toast.success(res?.message || "已停止错峰签到队列");
+      await Promise.all([load(), refreshQueueStatus()]);
+    } catch (e: any) {
+      toast.error(e.message || "停止错峰签到失败");
+    } finally {
+      setStopping(false);
     }
   };
 
@@ -248,24 +336,126 @@ export default function CheckinLog() {
     </div>
   );
 
+  const queueActive = queueStatus?.active === true;
+  const spreadConfigured = queueStatus?.mode === "spread";
+  const canStopSpread = spreadConfigured || queueActive;
+  const progressPercent = clampProgressPercent(queueStatus?.progressPercent);
+  const eligibleCount = Number(queueStatus?.eligibleCount || 0);
+  const completedCount = Number(queueStatus?.completedCount || 0);
+  const pendingCount = Number(queueStatus?.pendingCount || 0);
+  const queueBadgeClass = queueActive
+    ? (queueStatus?.running ? "badge-info" : "badge-warning")
+    : (spreadConfigured ? "badge-success" : "badge-muted");
+  const queueBadgeLabel = queueActive
+    ? (queueStatus?.running ? "签到中" : "等待中")
+    : (spreadConfigured ? "已启用" : "未运行");
+  const queueStatusText = queueStatusLoading && !queueStatus
+    ? "正在读取错峰签到状态"
+    : queueStatus?.running && queueStatus.currentAccount
+      ? `正在签到：${formatQueueAccount(queueStatus.currentAccount)}`
+      : queueStatus?.waiting && queueStatus.nextRunAt
+        ? `等待下一次执行：${formatCheckinLogTime(queueStatus.nextRunAt)}`
+        : spreadConfigured && eligibleCount > 0 && pendingCount === 0
+          ? "今日错峰签到已处理完"
+        : queueStatus?.lastAccount && completedCount > 0
+          ? `上次完成：${formatQueueAccount(queueStatus.lastAccount)}`
+          : spreadConfigured
+            ? "已启用每日 08:00 错峰签到"
+            : "当前没有运行中的错峰签到队列";
+
   return (
     <div className="animate-fade-in">
       <div className="page-header">
         <h2 className="page-title">{tr("签到记录")}</h2>
-        <button
-          onClick={handleTriggerAll}
-          disabled={triggering}
-          className="btn btn-soft-primary"
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
+          {canStopSpread ? (
+            <button
+              type="button"
+              onClick={handleStopSpread}
+              disabled={stopping || triggering}
+              className="btn btn-ghost"
+            >
+              {stopping ? (
+                <>
+                  <span className="spinner spinner-sm" />
+                  停止中...
+                </>
+              ) : (
+                "停止错峰签到"
+              )}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={handleTriggerAll}
+            disabled={triggering || stopping || queueActive}
+            className="btn btn-soft-primary"
+          >
+            {triggering ? (
+              <>
+                <span className="spinner spinner-sm" />
+                启动中...
+              </>
+            ) : queueActive ? (
+              "错峰签到执行中"
+            ) : (
+              "开始错峰签到"
+            )}
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 16, marginBottom: 12, display: "grid", gap: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
         >
-          {triggering ? (
-            <>
-              <span className="spinner spinner-sm" />
-              启动中...
-            </>
-          ) : (
-            "开始错峰签到"
-          )}
-        </button>
+          <div style={{ display: "grid", gap: 4 }}>
+            <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>错峰签到进度</div>
+            <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
+              {queueStatusText}
+            </div>
+          </div>
+          <span className={`badge ${queueBadgeClass}`}>{queueBadgeLabel}</span>
+        </div>
+        <div
+          aria-label="错峰签到完成进度"
+          style={{
+            height: 8,
+            borderRadius: 999,
+            background: "color-mix(in srgb, var(--color-border) 70%, var(--color-bg-card))",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              width: `${progressPercent}%`,
+              height: "100%",
+              borderRadius: 999,
+              background: "var(--color-primary)",
+              transition: "width 180ms ease",
+            }}
+          />
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+            gap: 10,
+            fontSize: 13,
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          <div>总账号：<strong>{eligibleCount}</strong></div>
+          <div>已处理：<strong>{completedCount}</strong></div>
+          <div>待处理：<strong>{pendingCount}</strong></div>
+          <div>间隔：<strong>{queueStatus?.intervalMinutes || "-"} 分钟</strong></div>
+        </div>
       </div>
 
       <ResponsiveFilterPanel
