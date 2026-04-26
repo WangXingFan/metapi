@@ -2,7 +2,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api.js";
 import CenteredModal from "../components/CenteredModal.js";
+import {
+  ColumnVisibilityControl,
+  type ColumnOption,
+  useColumnVisibility,
+} from "../components/ColumnVisibilityControl.js";
 import { MobileCard, MobileField } from "../components/MobileCard.js";
+import RefreshButton from "../components/RefreshButton.js";
 import { useIsMobile } from "../components/useIsMobile.js";
 import { useToast } from "../components/Toast.js";
 import { formatDateTimeLocal } from "./helpers/checkinLogTime.js";
@@ -20,6 +26,7 @@ type AccountItem = {
   status?: string | null;
   credentialMode?: "session" | "apikey" | string;
   checkinEnabled?: boolean;
+  balance?: number | null;
   createdAt?: string | null;
   updatedAt?: string | null;
   apiToken?: string | null;
@@ -68,6 +75,11 @@ type CredentialForm = {
   platformUserId: string;
   credentialMode: CredentialMode;
   skipModelFetch: boolean;
+};
+
+type RebindForm = {
+  accessToken: string;
+  platformUserId: string;
 };
 
 function createLoginForm(siteId = 0): LoginForm {
@@ -124,6 +136,32 @@ function canAccountCheckin(account: AccountItem): boolean {
   return account.credentialMode !== "apikey" && account.capabilities?.canCheckin === true;
 }
 
+function canRebindAccount(account: AccountItem): boolean {
+  return account.status === "expired" && account.credentialMode !== "apikey";
+}
+
+function formatAccountBalance(value: unknown): string {
+  const balance = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(balance)) return "-";
+  return balance.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+type AccountColumnKey = "account" | "site" | "type" | "status" | "balance" | "checkin" | "updatedAt" | "actions";
+
+const ACCOUNT_COLUMNS: ColumnOption<AccountColumnKey>[] = [
+  { key: "account", label: "账户" },
+  { key: "site", label: "站点" },
+  { key: "type", label: "类型" },
+  { key: "status", label: "状态" },
+  { key: "balance", label: "余额" },
+  { key: "checkin", label: "签到" },
+  { key: "updatedAt", label: "更新时间" },
+  { key: "actions", label: "操作" },
+];
+
 export default function LiteAccounts() {
   const toast = useToast();
   const navigate = useNavigate();
@@ -144,6 +182,12 @@ export default function LiteAccounts() {
   const [checkinSettingsLoading, setCheckinSettingsLoading] = useState(false);
   const [checkinSettingsSaving, setCheckinSettingsSaving] = useState(false);
   const [checkinSpreadIntervalMinutes, setCheckinSpreadIntervalMinutes] = useState(5);
+  const [rebindAccount, setRebindAccount] = useState<AccountItem | null>(null);
+  const [rebindForm, setRebindForm] = useState<RebindForm>({
+    accessToken: "",
+    platformUserId: "",
+  });
+  const [rebinding, setRebinding] = useState(false);
 
   const requestedSiteId = useMemo(
     () => parsePositiveInt(new URLSearchParams(location.search).get("siteId")),
@@ -238,17 +282,6 @@ export default function LiteAccounts() {
     });
   }, [accounts, search, siteFilter]);
 
-  const summary = useMemo(() => {
-    const session = filteredAccounts.filter((item) => item.credentialMode !== "apikey").length;
-    const apiKey = filteredAccounts.filter((item) => item.credentialMode === "apikey").length;
-    const checkinEnabled = filteredAccounts.filter((item) => canAccountCheckin(item) && item.checkinEnabled).length;
-    return {
-      total: filteredAccounts.length,
-      session,
-      apiKey,
-      checkinEnabled,
-    };
-  }, [filteredAccounts]);
 
   const closeCreate = () => {
     setCreateOpen(false);
@@ -272,6 +305,59 @@ export default function LiteAccounts() {
       ),
     );
     setCreateOpen(true);
+  };
+
+  const openRebind = (account: AccountItem) => {
+    setRebindAccount(account);
+    setRebindForm({
+      accessToken: "",
+      platformUserId: "",
+    });
+  };
+
+  const closeRebind = () => {
+    setRebindAccount(null);
+    setRebindForm({
+      accessToken: "",
+      platformUserId: "",
+    });
+    setRebinding(false);
+  };
+
+  const saveRebind = async () => {
+    if (!rebindAccount) return;
+    const accessToken = rebindForm.accessToken.trim();
+    if (!accessToken) {
+      toast.error("请粘贴新的 Session Token");
+      return;
+    }
+
+    const platformUserIdRaw = rebindForm.platformUserId.trim();
+    const platformUserId = platformUserIdRaw
+      ? Number.parseInt(platformUserIdRaw, 10)
+      : undefined;
+    if (platformUserIdRaw && (!Number.isFinite(platformUserId) || !platformUserId || platformUserId <= 0)) {
+      toast.error("平台用户 ID 必须是正整数");
+      return;
+    }
+
+    setRebinding(true);
+    try {
+      const result = await api.rebindAccountSession(rebindAccount.id, {
+        accessToken,
+        platformUserId,
+      });
+      if (result?.success === false) {
+        throw new Error(result.message || "重新绑定失败");
+      }
+      toast.success(result?.apiTokenFound ? "账户已重新绑定，并已获取 key" : "账户已重新绑定");
+      closeRebind();
+      await load();
+    } catch (error: any) {
+      toast.error(error?.message || "重新绑定失败");
+    } finally {
+      setRebinding(false);
+    }
   };
 
   const openCheckinSettings = async () => {
@@ -438,12 +524,11 @@ export default function LiteAccounts() {
     }
   };
 
-  const summaryCards = [
-    { label: "账户总数", value: summary.total },
-    { label: "Session 账户", value: summary.session },
-    { label: "API Key 连接", value: summary.apiKey },
-    { label: "已开启签到", value: summary.checkinEnabled },
-  ];
+
+  const { visibleColumns, isColumnVisible, toggleColumn, showAllColumns } = useColumnVisibility(
+    "metapi.liteAccounts.columns",
+    ACCOUNT_COLUMNS,
+  );
 
   if (requestedSegment === "tokens") {
     const params = new URLSearchParams(location.search);
@@ -470,6 +555,7 @@ export default function LiteAccounts() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <RefreshButton onRefresh={load} refreshing={loading} />
           <button type="button" className="btn btn-ghost" onClick={() => void openCheckinSettings()}>
             签到设置
           </button>
@@ -479,31 +565,13 @@ export default function LiteAccounts() {
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 12,
-        }}
-      >
-        {summaryCards.map((item) => (
-          <div key={item.label} className="card" style={{ padding: 16 }}>
-            <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 8 }}>
-              {item.label}
-            </div>
-            <div style={{ display: "flex", alignItems: "center" }}>
-              <strong style={{ fontSize: 24, lineHeight: 1 }}>{item.value}</strong>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
+      <div className="card" style={{ padding: 20, display: "grid", gap: 16 }}>
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "minmax(180px, 240px) minmax(220px, 1fr)",
-            gap: 12,
+            gridTemplateColumns: "minmax(180px, 240px) minmax(220px, 1fr) auto",
+            gap: 14,
+            alignItems: "end",
           }}
         >
           <label>
@@ -530,6 +598,14 @@ export default function LiteAccounts() {
               style={inputStyle}
             />
           </label>
+          {!isMobile && filteredAccounts.length > 0 ? (
+            <ColumnVisibilityControl
+              columns={ACCOUNT_COLUMNS}
+              visibleColumns={visibleColumns}
+              onToggleColumn={toggleColumn}
+              onShowAll={showAllColumns}
+            />
+          ) : null}
         </div>
 
         {loading ? (
@@ -559,6 +635,15 @@ export default function LiteAccounts() {
                     <button type="button" className="btn btn-link" onClick={() => navigate(`/keys?accountId=${account.id}`)}>
                       查看 Key
                     </button>
+                    {canRebindAccount(account) ? (
+                      <button
+                        type="button"
+                        className="btn btn-link"
+                        onClick={() => openRebind(account)}
+                      >
+                        重新绑定
+                      </button>
+                    ) : null}
                     {canAccountCheckin(account) ? (
                       <button
                         type="button"
@@ -583,6 +668,7 @@ export default function LiteAccounts() {
                   label="类型"
                   value={account.credentialMode === "apikey" ? "API Key 连接" : "Session 账户"}
                 />
+                <MobileField label="余额" value={formatAccountBalance(account.balance)} />
                 <MobileField
                   label="签到"
                   value={
@@ -623,80 +709,107 @@ export default function LiteAccounts() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>账户</th>
-                  <th>站点</th>
-                  <th>类型</th>
-                  <th>状态</th>
-                  <th>签到</th>
-                  <th>更新时间</th>
-                  <th style={{ textAlign: "right" }}>操作</th>
+                  {isColumnVisible("account") ? <th>账户</th> : null}
+                  {isColumnVisible("site") ? <th>站点</th> : null}
+                  {isColumnVisible("type") ? <th>类型</th> : null}
+                  {isColumnVisible("status") ? <th>状态</th> : null}
+                  {isColumnVisible("balance") ? <th>余额</th> : null}
+                  {isColumnVisible("checkin") ? <th>签到</th> : null}
+                  {isColumnVisible("updatedAt") ? <th>更新时间</th> : null}
+                  {isColumnVisible("actions") ? <th style={{ textAlign: "right" }}>操作</th> : null}
                 </tr>
               </thead>
               <tbody>
                 {filteredAccounts.map((account) => (
                   <tr key={account.id}>
-                    <td style={{ fontWeight: 600 }}>{resolveAccountName(account)}</td>
-                    <td>
-                      <div style={{ display: "grid", gap: 4 }}>
-                        <span>{account.site?.name || "-"}</span>
-                        <span style={monoTextStyle}>{account.site?.url || "-"}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`badge ${account.credentialMode === "apikey" ? "badge-warning" : "badge-info"}`}>
-                        {account.credentialMode === "apikey" ? "API Key 连接" : "Session 账户"}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`badge ${statusBadgeClass(account.status)}`}>
-                        {account.status === "disabled" ? "停用" : account.status === "expired" ? "过期" : "正常"}
-                      </span>
-                    </td>
-                    <td>
-                      {canAccountCheckin(account) ? (
-                        <button
-                          type="button"
-                          className={`btn ${account.checkinEnabled ? "btn-ghost" : "btn-primary"}`}
-                          style={{ padding: "6px 10px", minHeight: "auto" }}
-                          onClick={() => void toggleCheckin(account)}
-                          disabled={actionId === `checkin-${account.id}`}
-                        >
-                          {actionId === `checkin-${account.id}`
-                            ? "处理中..."
-                            : account.checkinEnabled
-                              ? "已开启"
-                              : "已关闭"}
-                        </button>
-                      ) : (
-                        <span style={{ color: "var(--color-text-muted)" }}>不支持</span>
-                      )}
-                    </td>
-                    <td style={{ whiteSpace: "nowrap", color: "var(--color-text-muted)" }}>
-                      {formatDateTimeLocal(account.updatedAt || account.createdAt)}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-                        <button type="button" className="btn btn-link" onClick={() => navigate(`/keys?accountId=${account.id}`)}>
-                          查看 Key
-                        </button>
+                    {isColumnVisible("account") ? <td style={{ fontWeight: 600 }}>{resolveAccountName(account)}</td> : null}
+                    {isColumnVisible("site") ? (
+                      <td>
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <span>{account.site?.name || "-"}</span>
+                          <span style={monoTextStyle}>{account.site?.url || "-"}</span>
+                        </div>
+                      </td>
+                    ) : null}
+                    {isColumnVisible("type") ? (
+                      <td>
+                        <span className={`badge ${account.credentialMode === "apikey" ? "badge-warning" : "badge-info"}`}>
+                          {account.credentialMode === "apikey" ? "API Key 连接" : "Session 账户"}
+                        </span>
+                      </td>
+                    ) : null}
+                    {isColumnVisible("status") ? (
+                      <td>
+                        <span className={`badge ${statusBadgeClass(account.status)}`}>
+                          {account.status === "disabled" ? "停用" : account.status === "expired" ? "过期" : "正常"}
+                        </span>
+                      </td>
+                    ) : null}
+                    {isColumnVisible("balance") ? (
+                      <td>
+                        <span style={monoTextStyle}>{formatAccountBalance(account.balance)}</span>
+                      </td>
+                    ) : null}
+                    {isColumnVisible("checkin") ? (
+                      <td>
                         {canAccountCheckin(account) ? (
                           <button
                             type="button"
-                            className="btn btn-link"
-                            onClick={() => void runCheckin(account)}
-                            disabled={actionId === `run-${account.id}`}
+                            className={`btn ${account.checkinEnabled ? "btn-ghost" : "btn-primary"}`}
+                            style={{ padding: "6px 10px", minHeight: "auto" }}
+                            onClick={() => void toggleCheckin(account)}
+                            disabled={actionId === `checkin-${account.id}`}
                           >
-                            {actionId === `run-${account.id}` ? "执行中..." : "签到"}
+                            {actionId === `checkin-${account.id}`
+                              ? "处理中..."
+                              : account.checkinEnabled
+                                ? "已开启"
+                                : "已关闭"}
                           </button>
-                        ) : null}
-                        <button type="button" className="btn btn-link" onClick={() => void toggleStatus(account)}>
-                          {account.status === "disabled" ? "启用" : "停用"}
-                        </button>
-                        <button type="button" className="btn btn-link btn-link-danger" onClick={() => void deleteAccount(account)}>
-                          删除
-                        </button>
-                      </div>
-                    </td>
+                        ) : (
+                          <span style={{ color: "var(--color-text-muted)" }}>不支持</span>
+                        )}
+                      </td>
+                    ) : null}
+                    {isColumnVisible("updatedAt") ? (
+                      <td style={{ whiteSpace: "nowrap", color: "var(--color-text-muted)" }}>
+                        {formatDateTimeLocal(account.updatedAt || account.createdAt)}
+                      </td>
+                    ) : null}
+                    {isColumnVisible("actions") ? (
+                      <td style={{ textAlign: "right" }}>
+                        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                          <button type="button" className="btn btn-link" onClick={() => navigate(`/keys?accountId=${account.id}`)}>
+                            查看 Key
+                          </button>
+                          {canRebindAccount(account) ? (
+                            <button
+                              type="button"
+                              className="btn btn-link"
+                              onClick={() => openRebind(account)}
+                            >
+                              重新绑定
+                            </button>
+                          ) : null}
+                          {canAccountCheckin(account) ? (
+                            <button
+                              type="button"
+                              className="btn btn-link"
+                              onClick={() => void runCheckin(account)}
+                              disabled={actionId === `run-${account.id}`}
+                            >
+                              {actionId === `run-${account.id}` ? "执行中..." : "签到"}
+                            </button>
+                          ) : null}
+                          <button type="button" className="btn btn-link" onClick={() => void toggleStatus(account)}>
+                            {account.status === "disabled" ? "启用" : "停用"}
+                          </button>
+                          <button type="button" className="btn btn-link btn-link-danger" onClick={() => void deleteAccount(account)}>
+                            删除
+                          </button>
+                        </div>
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -761,6 +874,77 @@ export default function LiteAccounts() {
           </div>
         )}
       </CenteredModal>
+
+      {rebindAccount ? (
+        <CenteredModal
+          open
+          onClose={closeRebind}
+          title="重新绑定 Session"
+          maxWidth={620}
+          closeOnBackdrop
+          closeOnEscape
+          bodyStyle={{ display: "grid", gap: 14 }}
+          footer={(
+            <>
+              <button type="button" className="btn btn-ghost" onClick={closeRebind} disabled={rebinding}>
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void saveRebind()}
+                disabled={rebinding}
+              >
+                {rebinding ? "绑定中..." : "确认绑定"}
+              </button>
+            </>
+          )}
+        >
+          <div style={{ display: "grid", gap: 14 }}>
+            <div
+              style={{
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--color-border)",
+                background: "var(--color-bg-card)",
+                padding: 12,
+                display: "grid",
+                gap: 4,
+              }}
+            >
+              <div style={{ fontWeight: 700 }}>{resolveAccountName(rebindAccount)}</div>
+              <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                {rebindAccount.site?.name || "-"}
+              </div>
+            </div>
+            <label>
+              <div style={fieldLabelStyle}>新的 Session / Cookie / Access Token</div>
+              <textarea
+                value={rebindForm.accessToken}
+                onChange={(event) =>
+                  setRebindForm((current) => ({ ...current, accessToken: event.target.value }))
+                }
+                placeholder="粘贴新的 Session Token"
+                style={{ ...inputStyle, minHeight: 110, resize: "vertical", fontFamily: "var(--font-mono)" }}
+                autoFocus
+              />
+            </label>
+            <label>
+              <div style={fieldLabelStyle}>平台用户 ID（可选）</div>
+              <input
+                value={rebindForm.platformUserId}
+                onChange={(event) =>
+                  setRebindForm((current) => ({ ...current, platformUserId: event.target.value }))
+                }
+                placeholder="仅部分站点需要"
+                style={inputStyle}
+              />
+            </label>
+            <div style={{ fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+              绑定成功后账户状态会恢复为正常，并刷新该账户的 key、余额和模型信息。
+            </div>
+          </div>
+        </CenteredModal>
+      ) : null}
 
       <CenteredModal
         open={createOpen}

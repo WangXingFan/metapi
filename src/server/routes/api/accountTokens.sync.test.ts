@@ -841,6 +841,29 @@ describe('account tokens sync routes with site status', () => {
     expect(existing).toBeDefined();
   });
 
+  it('allows local-only token deletion when the stored token value cannot be deleted upstream', async () => {
+    const { account } = await seedAccount({ siteStatus: 'active' });
+    const token = await db.insert(schema.accountTokens).values({
+      accountId: account.id,
+      name: 'incorrect-completed-token',
+      token: 'sk-wrong-local-token',
+      source: 'sync',
+      enabled: true,
+      isDefault: false,
+    }).returning().get();
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/account-tokens/${token.id}?localOnly=1`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(deleteApiTokenMock).not.toHaveBeenCalled();
+
+    const removed = await db.select().from(schema.accountTokens).where(eq(schema.accountTokens.id, token.id)).get();
+    expect(removed).toBeUndefined();
+  });
+
   it('rejects retrieving token value when stored token is masked', async () => {
     const { account } = await seedAccount({ siteStatus: 'active' });
     const token = await db.insert(schema.accountTokens).values({

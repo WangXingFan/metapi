@@ -675,7 +675,10 @@ export async function accountTokensRoutes(app: FastifyInstance) {
     };
   });
 
-  const deleteAccountTokenById = async (tokenId: number): Promise<{ success: boolean; message?: string }> => {
+  const deleteAccountTokenById = async (
+    tokenId: number,
+    options: { localOnly?: boolean } = {},
+  ): Promise<{ success: boolean; message?: string }> => {
     const row = await db.select()
       .from(schema.accountTokens)
       .innerJoin(schema.accounts, eq(schema.accountTokens.accountId, schema.accounts.id))
@@ -694,7 +697,8 @@ export async function accountTokensRoutes(app: FastifyInstance) {
     const account = row.accounts;
     const site = row.sites;
     const adapter = getAdapter(site.platform);
-    const shouldDeleteUpstream = !isMaskedPendingAccountToken(existing)
+    const shouldDeleteUpstream = !options.localOnly
+      && !isMaskedPendingAccountToken(existing)
       && !isSiteDisabled(site.status)
       && !!account.accessToken?.trim()
       && !!adapter;
@@ -717,7 +721,7 @@ export async function accountTokensRoutes(app: FastifyInstance) {
 
     await db.delete(schema.accountTokens).where(eq(schema.accountTokens.id, tokenId)).run();
     if (existing.isDefault) {
-      repairDefaultToken(existing.accountId);
+      await repairDefaultToken(existing.accountId);
     }
 
     return { success: true };
@@ -985,12 +989,13 @@ export async function accountTokensRoutes(app: FastifyInstance) {
     }
   });
 
-  app.delete<{ Params: { id: string } }>('/api/account-tokens/:id', async (request, reply) => {
+  app.delete<{ Params: { id: string }; Querystring: { localOnly?: string } }>('/api/account-tokens/:id', async (request, reply) => {
     const tokenId = Number.parseInt(request.params.id, 10);
     if (Number.isNaN(tokenId)) {
       return reply.code(400).send({ success: false, message: '令牌 ID 无效' });
     }
-    const result = await deleteAccountTokenById(tokenId);
+    const localOnly = ['1', 'true', 'yes'].includes(String(request.query.localOnly || '').trim().toLowerCase());
+    const result = await deleteAccountTokenById(tokenId, { localOnly });
     if (!result.success) {
       const statusCode = result.message === '令牌不存在'
         ? 404

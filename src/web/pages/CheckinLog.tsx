@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
 import { MobileCard, MobileField } from "../components/MobileCard.js";
+import RefreshButton from "../components/RefreshButton.js";
 import ResponsiveFilterPanel from "../components/ResponsiveFilterPanel.js";
 import { useToast } from "../components/Toast.js";
 import { useIsMobile } from "../components/useIsMobile.js";
@@ -259,6 +260,10 @@ export default function CheckinLog() {
     }
   };
 
+  const handleRefresh = async () => {
+    await Promise.all([load(), refreshQueueStatus(true)]);
+  };
+
   const statusLabel = (status: "success" | "failed" | "skipped") => {
     if (status === "success") return "成功";
     if (status === "skipped") return "跳过";
@@ -368,6 +373,7 @@ export default function CheckinLog() {
       <div className="page-header">
         <h2 className="page-title">{tr("签到记录")}</h2>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
+          <RefreshButton onRefresh={handleRefresh} refreshing={loading} />
           {canStopSpread ? (
             <button
               type="button"

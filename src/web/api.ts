@@ -875,8 +875,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
-  deleteAccountToken: (id: number) =>
-    request(`/api/account-tokens/${id}`, { method: "DELETE" }),
+  deleteAccountToken: (id: number, options?: { localOnly?: boolean }) =>
+    request(
+      `/api/account-tokens/${id}${options?.localOnly ? "?localOnly=1" : ""}`,
+      { method: "DELETE" },
+    ),
   batchUpdateAccountTokens: (data: any) =>
     request("/api/account-tokens/batch", {
       method: "POST",

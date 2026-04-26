@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import ModernSelect from '../components/ModernSelect.js';
+import RefreshButton from '../components/RefreshButton.js';
 import { useToast } from '../components/Toast.js';
 import { tr } from '../i18n.js';
 
@@ -284,6 +285,7 @@ export default function ImportExport() {
   const [webdavConfig, setWebdavConfig] = useState<WebdavConfigForm>(DEFAULT_WEBDAV_CONFIG);
   const [savedWebdavConfig, setSavedWebdavConfig] = useState<WebdavConfigSnapshot>(DEFAULT_WEBDAV_SNAPSHOT);
   const [webdavState, setWebdavState] = useState<WebdavSyncState>({ lastSyncAt: null, lastError: null });
+  const [webdavConfigLoading, setWebdavConfigLoading] = useState(false);
   const [webdavSaving, setWebdavSaving] = useState(false);
   const [webdavAction, setWebdavAction] = useState<'export' | 'import' | ''>('');
   const [clearWebdavPassword, setClearWebdavPassword] = useState(false);
@@ -341,8 +343,27 @@ export default function ImportExport() {
     || clearWebdavPassword
   );
 
+  const reloadWebdavConfig = async () => {
+    const confirmed = !webdavConfigDirty
+      || typeof window === 'undefined'
+      || typeof window.confirm !== 'function'
+      || window.confirm('刷新会丢弃当前未保存的 WebDAV 配置改动，确认继续？');
+    if (!confirmed) return;
+
+    setWebdavConfigLoading(true);
+    try {
+      const result = await api.getBackupWebdavConfig();
+      applyWebdavResponse(result);
+    } catch (err: any) {
+      toast.error(err?.message || '加载 WebDAV 配置失败');
+    } finally {
+      setWebdavConfigLoading(false);
+    }
+  };
+
   useEffect(() => {
     let alive = true;
+    setWebdavConfigLoading(true);
     void api.getBackupWebdavConfig()
       .then((result: any) => {
         if (!alive) return;
@@ -351,6 +372,10 @@ export default function ImportExport() {
       .catch((err: any) => {
         if (!alive) return;
         toast.error(err?.message || '加载 WebDAV 配置失败');
+      })
+      .finally(() => {
+        if (!alive) return;
+        setWebdavConfigLoading(false);
       });
     return () => {
       alive = false;
@@ -513,6 +538,7 @@ export default function ImportExport() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <RefreshButton onRefresh={reloadWebdavConfig} refreshing={webdavConfigLoading} label="刷新配置" />
           <span className="badge badge-muted" style={{ fontSize: 11 }}>Schema v2.1</span>
           <span className="badge badge-warning" style={{ fontSize: 11 }}>敏感数据请离线保管</span>
         </div>

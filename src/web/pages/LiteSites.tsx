@@ -2,7 +2,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api.js";
 import CenteredModal from "../components/CenteredModal.js";
+import {
+  ColumnVisibilityControl,
+  type ColumnOption,
+  useColumnVisibility,
+} from "../components/ColumnVisibilityControl.js";
 import { MobileCard, MobileField } from "../components/MobileCard.js";
+import RefreshButton from "../components/RefreshButton.js";
 import { useIsMobile } from "../components/useIsMobile.js";
 import { useToast } from "../components/Toast.js";
 import { formatDateTimeLocal } from "./helpers/checkinLogTime.js";
@@ -52,6 +58,39 @@ function statusBadgeClass(status?: string | null): string {
   return status === "disabled" ? "badge-muted" : "badge-success";
 }
 
+function resolveExternalUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return "#";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function renderSiteUrlLink(url: string) {
+  const trimmed = url.trim();
+  if (!trimmed) return <span style={{ color: "var(--color-text-muted)" }}>未设置</span>;
+  return (
+    <a
+      href={resolveExternalUrl(trimmed)}
+      target="_blank"
+      rel="noreferrer"
+      style={{ ...monoTextStyle, color: "var(--color-primary)", textDecoration: "none" }}
+    >
+      {trimmed}
+    </a>
+  );
+}
+
+type SiteColumnKey = "name" | "platform" | "url" | "checkin" | "status" | "createdAt" | "actions";
+
+const SITE_COLUMNS: ColumnOption<SiteColumnKey>[] = [
+  { key: "name", label: "名称" },
+  { key: "platform", label: "平台" },
+  { key: "url", label: "主站地址" },
+  { key: "checkin", label: "签到入口" },
+  { key: "status", label: "状态" },
+  { key: "createdAt", label: "创建时间" },
+  { key: "actions", label: "操作" },
+];
+
 export default function LiteSites() {
   const toast = useToast();
   const navigate = useNavigate();
@@ -88,16 +127,6 @@ export default function LiteSites() {
     [sites],
   );
 
-  const summary = useMemo(() => {
-    const enabled = sortedSites.filter((site) => site.status !== "disabled").length;
-    const withCheckin = sortedSites.filter((site) => site.externalCheckinUrl).length;
-    return {
-      total: sortedSites.length,
-      enabled,
-      disabled: sortedSites.length - enabled,
-      withCheckin,
-    };
-  }, [sortedSites]);
 
   const openCreate = () => {
     setEditingSite(null);
@@ -206,12 +235,10 @@ export default function LiteSites() {
     }
   };
 
-  const summaryCards = [
-    { label: "站点总数", value: summary.total },
-    { label: "可用站点", value: summary.enabled },
-    { label: "停用站点", value: summary.disabled },
-    { label: "已配置签到入口", value: summary.withCheckin },
-  ];
+  const { visibleColumns, isColumnVisible, toggleColumn, showAllColumns } = useColumnVisibility(
+    "metapi.liteSites.columns",
+    SITE_COLUMNS,
+  );
 
   return (
     <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -222,29 +249,23 @@ export default function LiteSites() {
             这里只保留站点的基础信息维护，创建后可直接进入账户添加流程。
           </div>
         </div>
-        <button type="button" onClick={openCreate} className="btn btn-primary">
-          添加站点
-        </button>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <RefreshButton onRefresh={load} refreshing={loading} />
+          <button type="button" onClick={openCreate} className="btn btn-primary">
+            添加站点
+          </button>
+        </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 12,
-        }}
-      >
-        {summaryCards.map((item) => (
-          <div key={item.label} className="card" style={{ padding: 16 }}>
-            <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 8 }}>
-              {item.label}
-            </div>
-            <strong style={{ fontSize: 24, lineHeight: 1 }}>{item.value}</strong>
-          </div>
-        ))}
-      </div>
-
-      <div className="card" style={{ padding: 16 }}>
+      <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
+        {!isMobile && sortedSites.length > 0 ? (
+          <ColumnVisibilityControl
+            columns={SITE_COLUMNS}
+            visibleColumns={visibleColumns}
+            onToggleColumn={toggleColumn}
+            onShowAll={showAllColumns}
+          />
+        ) : null}
         {loading ? (
           <div style={{ display: "grid", gap: 10 }}>
             {Array.from({ length: 4 }).map((_, index) => (
@@ -288,7 +309,7 @@ export default function LiteSites() {
                 <MobileField
                   label="主站地址"
                   stacked
-                  value={<span style={monoTextStyle}>{site.url}</span>}
+                  value={renderSiteUrlLink(site.url)}
                 />
                 <MobileField
                   label="签到入口"
@@ -308,56 +329,68 @@ export default function LiteSites() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>名称</th>
-                  <th>平台</th>
-                  <th>主站地址</th>
-                  <th>签到入口</th>
-                  <th>状态</th>
-                  <th>创建时间</th>
-                  <th style={{ textAlign: "right" }}>操作</th>
+                  {isColumnVisible("name") ? <th>名称</th> : null}
+                  {isColumnVisible("platform") ? <th>平台</th> : null}
+                  {isColumnVisible("url") ? <th>主站地址</th> : null}
+                  {isColumnVisible("checkin") ? <th>签到入口</th> : null}
+                  {isColumnVisible("status") ? <th>状态</th> : null}
+                  {isColumnVisible("createdAt") ? <th>创建时间</th> : null}
+                  {isColumnVisible("actions") ? <th style={{ textAlign: "right" }}>操作</th> : null}
                 </tr>
               </thead>
               <tbody>
                 {sortedSites.map((site) => (
                   <tr key={site.id}>
-                    <td style={{ fontWeight: 600 }}>{site.name}</td>
-                    <td>
-                      <span className="badge badge-info">{site.platform || "自动"}</span>
-                    </td>
-                    <td>
-                      <span style={monoTextStyle}>{site.url}</span>
-                    </td>
-                    <td>
-                      {site.externalCheckinUrl ? (
-                        <span style={monoTextStyle}>{site.externalCheckinUrl}</span>
-                      ) : (
-                        <span style={{ color: "var(--color-text-muted)" }}>未设置</span>
-                      )}
-                    </td>
-                    <td>
-                      <span className={`badge ${statusBadgeClass(site.status)}`}>
-                        {site.status === "disabled" ? "停用" : "可用"}
-                      </span>
-                    </td>
-                    <td style={{ whiteSpace: "nowrap", color: "var(--color-text-muted)" }}>
-                      {formatDateTimeLocal(site.createdAt)}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-                        <button type="button" className="btn btn-link" onClick={() => navigate(`/accounts?siteId=${site.id}&create=1`)}>
-                          添加账户
-                        </button>
-                        <button type="button" className="btn btn-link" onClick={() => openEdit(site)}>
-                          编辑
-                        </button>
-                        <button type="button" className="btn btn-link" onClick={() => toggleSiteStatus(site)}>
-                          {site.status === "disabled" ? "启用" : "停用"}
-                        </button>
-                        <button type="button" className="btn btn-link btn-link-danger" onClick={() => void deleteSite(site)}>
-                          删除
-                        </button>
-                      </div>
-                    </td>
+                    {isColumnVisible("name") ? <td style={{ fontWeight: 600 }}>{site.name}</td> : null}
+                    {isColumnVisible("platform") ? (
+                      <td>
+                        <span className="badge badge-info">{site.platform || "自动"}</span>
+                      </td>
+                    ) : null}
+                    {isColumnVisible("url") ? (
+                      <td>
+                        {renderSiteUrlLink(site.url)}
+                      </td>
+                    ) : null}
+                    {isColumnVisible("checkin") ? (
+                      <td>
+                        {site.externalCheckinUrl ? (
+                          <span style={monoTextStyle}>{site.externalCheckinUrl}</span>
+                        ) : (
+                          <span style={{ color: "var(--color-text-muted)" }}>未设置</span>
+                        )}
+                      </td>
+                    ) : null}
+                    {isColumnVisible("status") ? (
+                      <td>
+                        <span className={`badge ${statusBadgeClass(site.status)}`}>
+                          {site.status === "disabled" ? "停用" : "可用"}
+                        </span>
+                      </td>
+                    ) : null}
+                    {isColumnVisible("createdAt") ? (
+                      <td style={{ whiteSpace: "nowrap", color: "var(--color-text-muted)" }}>
+                        {formatDateTimeLocal(site.createdAt)}
+                      </td>
+                    ) : null}
+                    {isColumnVisible("actions") ? (
+                      <td style={{ textAlign: "right" }}>
+                        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                          <button type="button" className="btn btn-link" onClick={() => navigate(`/accounts?siteId=${site.id}&create=1`)}>
+                            添加账户
+                          </button>
+                          <button type="button" className="btn btn-link" onClick={() => openEdit(site)}>
+                            编辑
+                          </button>
+                          <button type="button" className="btn btn-link" onClick={() => toggleSiteStatus(site)}>
+                            {site.status === "disabled" ? "启用" : "停用"}
+                          </button>
+                          <button type="button" className="btn btn-link btn-link-danger" onClick={() => void deleteSite(site)}>
+                            删除
+                          </button>
+                        </div>
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>

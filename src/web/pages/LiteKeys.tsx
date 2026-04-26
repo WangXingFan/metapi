@@ -2,7 +2,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api } from "../api.js";
 import CenteredModal from "../components/CenteredModal.js";
+import {
+  ColumnVisibilityControl,
+  type ColumnOption,
+  useColumnVisibility,
+} from "../components/ColumnVisibilityControl.js";
 import { MobileCard, MobileField } from "../components/MobileCard.js";
+import RefreshButton from "../components/RefreshButton.js";
 import { useIsMobile } from "../components/useIsMobile.js";
 import { useToast } from "../components/Toast.js";
 import { formatDateTimeLocal } from "./helpers/checkinLogTime.js";
@@ -56,6 +62,28 @@ function filterOutOauthAccounts(items: AccountItem[]): AccountItem[] {
 function isMaskedPendingToken(token: TokenItem): boolean {
   return token.valueStatus === "masked_pending";
 }
+
+type TokenColumnKey = "site" | "account" | "name" | "value" | "group" | "status" | "updatedAt" | "actions";
+type DirectKeyColumnKey = "site" | "account" | "key" | "updatedAt" | "actions";
+
+const TOKEN_COLUMNS: ColumnOption<TokenColumnKey>[] = [
+  { key: "site", label: "站点" },
+  { key: "account", label: "账户" },
+  { key: "name", label: "Key 名称" },
+  { key: "value", label: "Key 值" },
+  { key: "group", label: "分组" },
+  { key: "status", label: "状态" },
+  { key: "updatedAt", label: "更新时间" },
+  { key: "actions", label: "操作" },
+];
+
+const DIRECT_KEY_COLUMNS: ColumnOption<DirectKeyColumnKey>[] = [
+  { key: "site", label: "站点" },
+  { key: "account", label: "账户" },
+  { key: "key", label: "Key" },
+  { key: "updatedAt", label: "更新时间" },
+  { key: "actions", label: "操作" },
+];
 
 export default function LiteKeys() {
   const toast = useToast();
@@ -162,8 +190,6 @@ export default function LiteKeys() {
     }
     for (const bucket of map.values()) {
       bucket.sort((left, right) => {
-        if (left.isDefault === true && right.isDefault !== true) return -1;
-        if (left.isDefault !== true && right.isDefault === true) return 1;
         return String(left.name || "").localeCompare(String(right.name || ""));
       });
     }
@@ -181,11 +207,6 @@ export default function LiteKeys() {
       ),
     [filteredAccounts],
   );
-  const unsyncedSessionAccounts = useMemo(
-    () =>
-      sessionAccounts.filter((account) => (tokenMap.get(account.id) || []).length <= 0),
-    [sessionAccounts, tokenMap],
-  );
   const visibleTokenRows = useMemo(
     () =>
       sessionAccounts.flatMap((account) =>
@@ -197,20 +218,6 @@ export default function LiteKeys() {
     [sessionAccounts, tokenMap],
   );
 
-  const pendingTokenCount = useMemo(
-    () => visibleTokenRows.filter(({ token }) => isMaskedPendingToken(token)).length,
-    [visibleTokenRows],
-  );
-
-  const summary = useMemo(() => {
-    return {
-      sessionAccounts: sessionAccounts.length,
-      unsynced: unsyncedSessionAccounts.length,
-      tokens: visibleTokenRows.length,
-      pending: pendingTokenCount,
-      directApiKeys: apiKeyAccounts.length,
-    };
-  }, [apiKeyAccounts.length, pendingTokenCount, sessionAccounts.length, unsyncedSessionAccounts.length, visibleTokenRows.length]);
 
   const syncTokens = async (account: AccountItem) => {
     setActionId(`sync-${account.id}`);
@@ -259,14 +266,41 @@ export default function LiteKeys() {
     }
   };
 
-  const setDefaultToken = async (tokenId: number) => {
-    setActionId(`default-${tokenId}`);
+  const isDeletingToken = (tokenId: number) =>
+    actionId === `delete-token-${tokenId}` || actionId === `delete-token-local-${tokenId}`;
+
+  const deleteToken = async (token: TokenItem) => {
+    const tokenName = token.name || "未命名 key";
+    const confirmed =
+      typeof window === "undefined" || typeof window.confirm !== "function"
+        ? true
+        : window.confirm(`确定删除 key“${tokenName}”吗？会优先同步删除上游站点 key。`);
+    if (!confirmed) return;
+
+    setActionId(`delete-token-${token.id}`);
     try {
-      await api.setDefaultAccountToken(tokenId);
-      toast.success("默认 key 已更新");
+      await api.deleteAccountToken(token.id);
+      toast.success("key 已删除");
       await load();
     } catch (error: any) {
-      toast.error(error?.message || "设置默认 key 失败");
+      const message = error?.message || "删除 key 失败";
+      const localConfirmed =
+        typeof window === "undefined" || typeof window.confirm !== "function"
+          ? true
+          : window.confirm(`删除上游 key 失败：${message}\n是否仅删除本地记录？`);
+      if (!localConfirmed) {
+        toast.error(message);
+        return;
+      }
+
+      try {
+        setActionId(`delete-token-local-${token.id}`);
+        await api.deleteAccountToken(token.id, { localOnly: true });
+        toast.success("本地 key 记录已删除");
+        await load();
+      } catch (localError: any) {
+        toast.error(localError?.message || "删除本地 key 失败");
+      }
     } finally {
       setActionId("");
     }
@@ -308,13 +342,18 @@ export default function LiteKeys() {
     }
   };
 
-  const summaryCards = [
-    { label: "Session 账户", value: summary.sessionAccounts, tone: "badge-info" },
-    { label: "待同步账户", value: summary.unsynced, tone: "badge-warning" },
-    { label: "已同步 key", value: summary.tokens, tone: "badge-success" },
-    { label: "待补全 key", value: summary.pending, tone: "badge-warning" },
-    { label: "直连 API Key", value: summary.directApiKeys, tone: "badge-muted" },
-  ];
+  const {
+    visibleColumns: visibleTokenColumns,
+    isColumnVisible: isTokenColumnVisible,
+    toggleColumn: toggleTokenColumn,
+    showAllColumns: showAllTokenColumns,
+  } = useColumnVisibility("metapi.liteKeys.tokens.columns", TOKEN_COLUMNS);
+  const {
+    visibleColumns: visibleDirectKeyColumns,
+    isColumnVisible: isDirectKeyColumnVisible,
+    toggleColumn: toggleDirectKeyColumn,
+    showAllColumns: showAllDirectKeyColumns,
+  } = useColumnVisibility("metapi.liteKeys.direct.columns", DIRECT_KEY_COLUMNS);
 
   return (
     <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -325,33 +364,16 @@ export default function LiteKeys() {
             这里集中处理两类 key：Session 账户同步出来的站点 key，以及直接导入的 API Key 连接。
           </div>
         </div>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 12,
-        }}
-      >
-        {summaryCards.map((item) => (
-          <div key={item.label} className="card" style={{ padding: 16 }}>
-            <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 8 }}>
-              {item.label}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <strong style={{ fontSize: 24, lineHeight: 1 }}>{item.value}</strong>
-            </div>
-          </div>
-        ))}
+        <RefreshButton onRefresh={load} refreshing={loading} />
       </div>
 
       <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "minmax(180px, 220px) minmax(180px, 220px) minmax(220px, 1fr)",
+            gridTemplateColumns: "minmax(180px, 220px) minmax(180px, 220px) minmax(220px, 1fr) auto",
             gap: 12,
+            alignItems: "end",
           }}
         >
           <label>
@@ -401,6 +423,14 @@ export default function LiteKeys() {
               style={inputStyle}
             />
           </label>
+          {!isMobile && (visibleTokenRows.length > 0 || apiKeyAccounts.length > 0) ? (
+            <ColumnVisibilityControl
+              columns={visibleTokenRows.length > 0 ? TOKEN_COLUMNS : DIRECT_KEY_COLUMNS}
+              visibleColumns={visibleTokenRows.length > 0 ? visibleTokenColumns : visibleDirectKeyColumns}
+              onToggleColumn={visibleTokenRows.length > 0 ? toggleTokenColumn : toggleDirectKeyColumn}
+              onShowAll={visibleTokenRows.length > 0 ? showAllTokenColumns : showAllDirectKeyColumns}
+            />
+          ) : null}
         </div>
 
         {loading ? (
@@ -411,55 +441,6 @@ export default function LiteKeys() {
           </div>
         ) : (
           <>
-            {unsyncedSessionAccounts.length > 0 ? (
-              <div
-                style={{
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid color-mix(in srgb, var(--color-warning) 28%, transparent)",
-                  background: "color-mix(in srgb, var(--color-warning) 8%, var(--color-bg-card))",
-                  padding: 14,
-                  display: "grid",
-                  gap: 12,
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>待同步的 Session 账户</div>
-                  <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 4 }}>
-                    这些账户还没有拿到站点 key，点击同步即可尝试从站点抓取。
-                  </div>
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                  {unsyncedSessionAccounts.map((account) => (
-                    <div
-                      key={`unsynced-${account.id}`}
-                      style={{
-                        borderRadius: "var(--radius-sm)",
-                        border: "1px solid var(--color-border)",
-                        background: "var(--color-bg-card)",
-                        padding: 12,
-                        minWidth: 220,
-                        display: "grid",
-                        gap: 8,
-                      }}
-                    >
-                      <div style={{ fontWeight: 600 }}>{resolveAccountName(account)}</div>
-                      <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-                        {account.site?.name || "-"}
-                      </div>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={() => void syncTokens(account)}
-                        disabled={actionId === `sync-${account.id}`}
-                      >
-                        {actionId === `sync-${account.id}` ? "同步中..." : "同步该账户 Key"}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
             {visibleTokenRows.length > 0 ? (
               <div className="card" style={{ padding: 0, boxShadow: "none", border: "1px solid var(--color-border)" }}>
                 {isMobile ? (
@@ -471,8 +452,8 @@ export default function LiteKeys() {
                           key={token.id}
                           title={token.name || "未命名 key"}
                           headerActions={(
-                            <span className={`badge ${isPending ? "badge-warning" : token.isDefault ? "badge-warning" : token.enabled ? "badge-success" : "badge-muted"}`} style={{ fontSize: 11 }}>
-                              {isPending ? "待补全" : token.isDefault ? "默认" : token.enabled ? "可用" : "停用"}
+                            <span className={`badge ${isPending ? "badge-warning" : token.enabled ? "badge-success" : "badge-muted"}`} style={{ fontSize: 11 }}>
+                              {isPending ? "待补全" : token.enabled ? "可用" : "停用"}
                             </span>
                           )}
                           footerActions={(
@@ -495,16 +476,6 @@ export default function LiteKeys() {
                                   复制
                                 </button>
                               )}
-                              {!isPending && !token.isDefault ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-link"
-                                  onClick={() => void setDefaultToken(token.id)}
-                                  disabled={actionId === `default-${token.id}`}
-                                >
-                                  设默认
-                                </button>
-                              ) : null}
                               <button
                                 type="button"
                                 className="btn btn-link"
@@ -512,6 +483,14 @@ export default function LiteKeys() {
                                 disabled={actionId === `sync-${account.id}`}
                               >
                                 同步
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-link btn-link-danger"
+                                onClick={() => void deleteToken(token)}
+                                disabled={isDeletingToken(token.id)}
+                              >
+                                {isDeletingToken(token.id) ? "删除中..." : "删除"}
                               </button>
                             </>
                           )}
@@ -534,14 +513,14 @@ export default function LiteKeys() {
                     <table className="data-table">
                       <thead>
                         <tr>
-                          <th>站点</th>
-                          <th>账户</th>
-                          <th>Key 名称</th>
-                          <th>Key 值</th>
-                          <th>分组</th>
-                          <th>状态</th>
-                          <th>更新时间</th>
-                          <th style={{ textAlign: "right" }}>操作</th>
+                          {isTokenColumnVisible("site") ? <th>站点</th> : null}
+                          {isTokenColumnVisible("account") ? <th>账户</th> : null}
+                          {isTokenColumnVisible("name") ? <th>Key 名称</th> : null}
+                          {isTokenColumnVisible("value") ? <th>Key 值</th> : null}
+                          {isTokenColumnVisible("group") ? <th>分组</th> : null}
+                          {isTokenColumnVisible("status") ? <th>状态</th> : null}
+                          {isTokenColumnVisible("updatedAt") ? <th>更新时间</th> : null}
+                          {isTokenColumnVisible("actions") ? <th style={{ textAlign: "right" }}>操作</th> : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -549,61 +528,67 @@ export default function LiteKeys() {
                           const isPending = isMaskedPendingToken(token);
                           return (
                             <tr key={token.id}>
-                              <td>{account.site?.name || "-"}</td>
-                              <td style={{ fontWeight: 600 }}>{resolveAccountName(account)}</td>
-                              <td>{token.name || "未命名 key"}</td>
-                              <td>
-                                <span style={monoTextStyle}>{token.tokenMasked || "-"}</span>
-                              </td>
-                              <td>{token.tokenGroup || "default"}</td>
-                              <td>
-                                <span className={`badge ${isPending ? "badge-warning" : token.isDefault ? "badge-warning" : token.enabled ? "badge-success" : "badge-muted"}`}>
-                                  {isPending ? "待补全" : token.isDefault ? "默认" : token.enabled ? "可用" : "停用"}
-                                </span>
-                              </td>
-                              <td style={{ whiteSpace: "nowrap", color: "var(--color-text-muted)" }}>
-                                {formatDateTimeLocal(token.updatedAt)}
-                              </td>
-                              <td style={{ textAlign: "right" }}>
-                                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-                                  {isPending ? (
+                              {isTokenColumnVisible("site") ? <td>{account.site?.name || "-"}</td> : null}
+                              {isTokenColumnVisible("account") ? <td style={{ fontWeight: 600 }}>{resolveAccountName(account)}</td> : null}
+                              {isTokenColumnVisible("name") ? <td>{token.name || "未命名 key"}</td> : null}
+                              {isTokenColumnVisible("value") ? (
+                                <td>
+                                  <span style={monoTextStyle}>{token.tokenMasked || "-"}</span>
+                                </td>
+                              ) : null}
+                              {isTokenColumnVisible("group") ? <td>{token.tokenGroup || "default"}</td> : null}
+                              {isTokenColumnVisible("status") ? (
+                                <td>
+                                  <span className={`badge ${isPending ? "badge-warning" : token.enabled ? "badge-success" : "badge-muted"}`}>
+                                    {isPending ? "待补全" : token.enabled ? "可用" : "停用"}
+                                  </span>
+                                </td>
+                              ) : null}
+                              {isTokenColumnVisible("updatedAt") ? (
+                                <td style={{ whiteSpace: "nowrap", color: "var(--color-text-muted)" }}>
+                                  {formatDateTimeLocal(token.updatedAt)}
+                                </td>
+                              ) : null}
+                              {isTokenColumnVisible("actions") ? (
+                                <td style={{ textAlign: "right" }}>
+                                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                                    {isPending ? (
+                                      <button
+                                        type="button"
+                                        className="btn btn-link"
+                                        onClick={() => openCompleteToken(token)}
+                                      >
+                                        补全
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="btn btn-link"
+                                        onClick={() => void copyTokenValue(token.id)}
+                                        disabled={actionId === `copy-token-${token.id}`}
+                                      >
+                                        {actionId === `copy-token-${token.id}` ? "复制中..." : "复制"}
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       className="btn btn-link"
-                                      onClick={() => openCompleteToken(token)}
+                                      onClick={() => void syncTokens(account)}
+                                      disabled={actionId === `sync-${account.id}`}
                                     >
-                                      补全
+                                      {actionId === `sync-${account.id}` ? "同步中..." : "同步所属账户"}
                                     </button>
-                                  ) : (
                                     <button
                                       type="button"
-                                      className="btn btn-link"
-                                      onClick={() => void copyTokenValue(token.id)}
-                                      disabled={actionId === `copy-token-${token.id}`}
+                                      className="btn btn-link btn-link-danger"
+                                      onClick={() => void deleteToken(token)}
+                                      disabled={isDeletingToken(token.id)}
                                     >
-                                      {actionId === `copy-token-${token.id}` ? "复制中..." : "复制"}
+                                      {isDeletingToken(token.id) ? "删除中..." : "删除"}
                                     </button>
-                                  )}
-                                  {!isPending && !token.isDefault ? (
-                                    <button
-                                      type="button"
-                                      className="btn btn-link"
-                                      onClick={() => void setDefaultToken(token.id)}
-                                      disabled={actionId === `default-${token.id}`}
-                                    >
-                                      {actionId === `default-${token.id}` ? "处理中..." : "设默认"}
-                                    </button>
-                                  ) : null}
-                                  <button
-                                    type="button"
-                                    className="btn btn-link"
-                                    onClick={() => void syncTokens(account)}
-                                    disabled={actionId === `sync-${account.id}`}
-                                  >
-                                    {actionId === `sync-${account.id}` ? "同步中..." : "同步所属账户"}
-                                  </button>
-                                </div>
-                              </td>
+                                  </div>
+                                </td>
+                              ) : null}
                             </tr>
                           );
                         })}
@@ -655,51 +640,65 @@ export default function LiteKeys() {
                     ))}
                   </div>
                 ) : (
-                  <div style={{ overflowX: "auto" }}>
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>站点</th>
-                          <th>账户</th>
-                          <th>Key</th>
-                          <th>更新时间</th>
-                          <th style={{ textAlign: "right" }}>操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {apiKeyAccounts.map((account) => (
-                          <tr key={`direct-row-${account.id}`}>
-                            <td>{account.site?.name || "-"}</td>
-                            <td style={{ fontWeight: 600 }}>{resolveAccountName(account)}</td>
-                            <td>
-                              <span style={monoTextStyle}>{maskSecret(account.apiToken)}</span>
-                            </td>
-                            <td style={{ whiteSpace: "nowrap", color: "var(--color-text-muted)" }}>
-                              {formatDateTimeLocal(account.updatedAt || account.createdAt)}
-                            </td>
-                            <td style={{ textAlign: "right" }}>
-                              <button
-                                type="button"
-                                className="btn btn-link"
-                                onClick={() => void copyDirectApiKey(account)}
-                                disabled={actionId === `copy-direct-${account.id}`}
-                              >
-                                {actionId === `copy-direct-${account.id}` ? "复制中..." : "复制"}
-                              </button>
-                            </td>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <ColumnVisibilityControl
+                      columns={DIRECT_KEY_COLUMNS}
+                      visibleColumns={visibleDirectKeyColumns}
+                      onToggleColumn={toggleDirectKeyColumn}
+                      onShowAll={showAllDirectKeyColumns}
+                    />
+                    <div style={{ overflowX: "auto" }}>
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            {isDirectKeyColumnVisible("site") ? <th>站点</th> : null}
+                            {isDirectKeyColumnVisible("account") ? <th>账户</th> : null}
+                            {isDirectKeyColumnVisible("key") ? <th>Key</th> : null}
+                            {isDirectKeyColumnVisible("updatedAt") ? <th>更新时间</th> : null}
+                            {isDirectKeyColumnVisible("actions") ? <th style={{ textAlign: "right" }}>操作</th> : null}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {apiKeyAccounts.map((account) => (
+                            <tr key={`direct-row-${account.id}`}>
+                              {isDirectKeyColumnVisible("site") ? <td>{account.site?.name || "-"}</td> : null}
+                              {isDirectKeyColumnVisible("account") ? <td style={{ fontWeight: 600 }}>{resolveAccountName(account)}</td> : null}
+                              {isDirectKeyColumnVisible("key") ? (
+                                <td>
+                                  <span style={monoTextStyle}>{maskSecret(account.apiToken)}</span>
+                                </td>
+                              ) : null}
+                              {isDirectKeyColumnVisible("updatedAt") ? (
+                                <td style={{ whiteSpace: "nowrap", color: "var(--color-text-muted)" }}>
+                                  {formatDateTimeLocal(account.updatedAt || account.createdAt)}
+                                </td>
+                              ) : null}
+                              {isDirectKeyColumnVisible("actions") ? (
+                                <td style={{ textAlign: "right" }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-link"
+                                    onClick={() => void copyDirectApiKey(account)}
+                                    disabled={actionId === `copy-direct-${account.id}`}
+                                  >
+                                    {actionId === `copy-direct-${account.id}` ? "复制中..." : "复制"}
+                                  </button>
+                                </td>
+                              ) : null}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
             ) : null}
 
-            {summary.tokens <= 0 && summary.directApiKeys <= 0 && summary.unsynced <= 0 ? (
+            {visibleTokenRows.length <= 0 && apiKeyAccounts.length <= 0 ? (
               <div className="empty-state" style={{ padding: 28 }}>
                 <div className="empty-state-title">暂无可用 key</div>
-                <div className="empty-state-desc">先在“账户”页添加站点账户，再回到这里同步或复制 key。</div>
+                <div className="empty-state-desc">当前筛选条件下没有已保存的 key。</div>
               </div>
             ) : null}
           </>

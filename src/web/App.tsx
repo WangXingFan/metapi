@@ -66,7 +66,6 @@ function ThemeToggle() {
       <span className="theme-toggle-track" aria-hidden="true">
         <span className="theme-toggle-thumb">{isDark ? t("暗") : t("亮")}</span>
       </span>
-      <span className="theme-toggle-label">{isDark ? t("深色") : t("浅色")}</span>
     </button>
   );
 }
@@ -113,52 +112,54 @@ export function Login({
         placeItems: "center",
         padding: 20,
         background:
-          "radial-gradient(circle at top left, rgba(180,83,9,0.12), transparent 32%), radial-gradient(circle at bottom right, rgba(15,23,42,0.14), transparent 28%), var(--color-bg)",
+          "radial-gradient(circle at top left, rgba(234,88,12,0.08), transparent 40%), radial-gradient(circle at bottom right, rgba(79,70,229,0.08), transparent 35%), var(--color-bg)",
       }}
     >
       <div
         className="card animate-scale-in"
         style={{
-          width: "min(980px, 100%)",
+          width: "min(1000px, 100%)",
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
           overflow: "hidden",
         }}
       >
         <section
           style={{
-            padding: 28,
-            background: "linear-gradient(135deg, #0f172a, #1f2937 62%, #9a3412)",
+            padding: 36,
+            background: "linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #ea580c 100%)",
             color: "#fff",
             display: "grid",
-            gap: 18,
+            gap: 20,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <img src="/logo.png" alt="Metapi" style={{ width: 42, height: 42, borderRadius: 10 }} />
+            <img src="/logo.png" alt="Metapi" style={{ width: 48, height: 48, borderRadius: 12 }} />
             <div>
-              <div style={{ fontSize: 17, fontWeight: 800 }}>Metapi Lite</div>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.72)" }}>
+              <div style={{ fontSize: 19, fontWeight: 800, letterSpacing: "-0.02em" }}>Metapi Lite</div>
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.75)" }}>
                 {t("仅保留站点、账户、Key、签到、导入导出")}
               </div>
             </div>
           </div>
-          <div style={{ fontSize: 28, lineHeight: 1.2, fontWeight: 800, maxWidth: 420 }}>
+          <div style={{ fontSize: 32, lineHeight: 1.2, fontWeight: 800, maxWidth: 420, letterSpacing: "-0.03em" }}>
             {t("面向运维闭环的极简工作台")}
           </div>
-          <div style={{ fontSize: 14, lineHeight: 1.8, color: "rgba(255,255,255,0.82)" }}>
+          <div style={{ fontSize: 15, lineHeight: 1.8, color: "rgba(255,255,255,0.85)" }}>
             {t("这一版移除了仪表盘、代理、路由、监控、OAuth、日志分析等扩展面板，只保留最短管理路径。")}
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
             {["添加站点", "添加账户", "获取 Key", "执行签到", "导入导出"].map((item) => (
               <span
                 key={item}
                 style={{
-                  padding: "6px 10px",
+                  padding: "8px 14px",
                   borderRadius: 999,
-                  background: "rgba(255,255,255,0.08)",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  fontSize: 12,
+                  background: "rgba(255,255,255,0.1)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  backdropFilter: "blur(8px)",
                 }}
               >
                 {t(item)}
@@ -175,19 +176,19 @@ export function Login({
           </div>
         </section>
 
-        <section style={{ padding: 28, display: "grid", gap: 16, alignContent: "center" }}>
+        <section style={{ padding: 36, display: "grid", gap: 20, alignContent: "center" }}>
           <div>
-            <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 8 }}>
+            <div style={{ fontSize: 14, color: "var(--color-text-muted)", marginBottom: 10, fontWeight: 600 }}>
               {t("管理员入口")}
             </div>
-            <h2 style={{ margin: 0, fontSize: 30, lineHeight: 1.2 }}>{t("登录")}</h2>
-            <p style={{ fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.7 }}>
+            <h2 style={{ margin: 0, fontSize: 32, lineHeight: 1.2, fontWeight: 800, letterSpacing: "-0.03em" }}>{t("登录")}</h2>
+            <p style={{ fontSize: 14, color: "var(--color-text-secondary)", lineHeight: 1.7, marginTop: 8 }}>
               {t("输入管理员令牌后进入精简版工作台。")}
             </p>
           </div>
 
           <label>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-secondary)", marginBottom: 6 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--color-text-secondary)", marginBottom: 8 }}>
               {t("管理员令牌")}
             </div>
             <input
@@ -205,10 +206,10 @@ export function Login({
               placeholder={t("请输入管理员令牌")}
               style={{
                 width: "100%",
-                padding: "12px 14px",
+                padding: "14px 16px",
                 border: "1px solid var(--color-border)",
                 borderRadius: "var(--radius-sm)",
-                fontSize: 14,
+                fontSize: 15,
                 background: "var(--color-bg)",
                 color: "var(--color-text-primary)",
               }}
@@ -226,7 +227,7 @@ export function Login({
             {loading ? t("验证中...") : t("登录")}
           </button>
 
-          <div style={{ fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.7 }}>
+          <div style={{ fontSize: 13, color: "var(--color-text-muted)", lineHeight: 1.7 }}>
             {t("登录只校验本地管理端权限，不会把管理员令牌发送到第三方站点。")}
           </div>
         </section>
@@ -293,12 +294,13 @@ function AppShell() {
 
       <main
         style={{
-          maxWidth: 1320,
+          maxWidth: 1360,
           margin: "0 auto",
-          padding: "20px 20px 36px",
+          padding: "28px 24px 48px",
           display: "grid",
-          gap: 16,
+          gap: 20,
         }}
+        className="main-content"
       >
         <Routes>
           <Route path="/" element={<Navigate to="/sites" replace />} />

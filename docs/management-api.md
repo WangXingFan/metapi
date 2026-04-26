@@ -32,6 +32,7 @@ Authorization: Bearer <AUTH_TOKEN>
 | --- | --- | --- |
 | `GET` | `/api/account-tokens` | 列出账号 Key |
 | `PUT` | `/api/account-tokens/:id` | 更新 Key |
+| `DELETE` | `/api/account-tokens/:id` | 删除 Key；可用 `?localOnly=1` 仅删除本地记录 |
 | `GET` | `/api/account-tokens/:id/value` | 读取完整 Key |
 | `POST` | `/api/account-tokens/:id/default` | 设置默认 Key |
 | `POST` | `/api/account-tokens/sync/:accountId` | 同步账户 Key |
