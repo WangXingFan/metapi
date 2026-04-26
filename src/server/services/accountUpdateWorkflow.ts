@@ -25,14 +25,44 @@ export async function applyAccountUpdateWorkflow(input: AccountUpdateWorkflowInp
     .where(eq(schema.accounts.id, input.accountId))
     .run();
 
-  const convergence = await convergeAccountMutation({
+  let convergence = await convergeAccountMutation({
     accountId: input.accountId,
     preferredApiToken: input.preferredApiToken,
     defaultTokenSource: 'manual',
-    refreshModels: false,
-    rebuildRoutes: false,
+    refreshModels: input.refreshModels,
+    allowInactiveModelRefresh: input.allowInactiveModelRefresh,
+    rebuildRoutes: input.refreshModels && !input.reactivateAfterSuccessfulModelRefresh,
     continueOnError: input.continueOnError,
   });
+
+  const modelRefreshResult = convergence.modelRefreshResult as {
+    refreshed?: boolean;
+    status?: string;
+  } | null;
+  if (
+    input.reactivateAfterSuccessfulModelRefresh
+    && modelRefreshResult?.refreshed === true
+    && modelRefreshResult.status === 'success'
+  ) {
+    await db.update(schema.accounts)
+      .set({
+        status: 'active',
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.accounts.id, input.accountId))
+      .run();
+
+    const routeConvergence = await convergeAccountMutation({
+      accountId: input.accountId,
+      rebuildRoutes: true,
+      continueOnError: input.continueOnError,
+    });
+    convergence = {
+      ...convergence,
+      rebuiltRoutes: routeConvergence.rebuiltRoutes,
+      rebuildResult: routeConvergence.rebuildResult,
+    };
+  }
 
   const account = await db.select()
     .from(schema.accounts)

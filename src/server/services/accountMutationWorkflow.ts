@@ -3,6 +3,7 @@ import {
   ensureDefaultTokenForAccount,
   syncTokensFromUpstream,
 } from './accountTokenService.js';
+import { refreshModelsForAccount, rebuildTokenRoutesFromAvailability } from './modelService.js';
 
 type ModelRefreshResult = {
   accountId: number;
@@ -68,8 +69,8 @@ export async function convergeAccountMutation(input: {
   refreshedModels: boolean;
   rebuiltRoutes: boolean;
   balanceResult: Awaited<ReturnType<typeof refreshBalance>> | null;
-  modelRefreshResult: ModelRefreshResult | null;
-  rebuildResult: DisabledRouteRebuildResult | null;
+  modelRefreshResult: Awaited<ReturnType<typeof refreshModelsForAccount>> | ModelRefreshResult | null;
+  rebuildResult: Awaited<ReturnType<typeof rebuildTokenRoutesFromAvailability>> | DisabledRouteRebuildResult | null;
 }> {
   const result = {
     defaultTokenId: null as number | null,
@@ -78,8 +79,8 @@ export async function convergeAccountMutation(input: {
     refreshedModels: false,
     rebuiltRoutes: false,
     balanceResult: null as Awaited<ReturnType<typeof refreshBalance>> | null,
-    modelRefreshResult: null as ModelRefreshResult | null,
-    rebuildResult: null as DisabledRouteRebuildResult | null,
+    modelRefreshResult: null as Awaited<ReturnType<typeof refreshModelsForAccount>> | ModelRefreshResult | null,
+    rebuildResult: null as Awaited<ReturnType<typeof rebuildTokenRoutesFromAvailability>> | DisabledRouteRebuildResult | null,
   };
 
   const runStep = async <T>(fn: () => Promise<T>): Promise<T | null> => {
@@ -138,11 +139,26 @@ export async function convergeAccountMutation(input: {
   }
 
   if (input.refreshModels) {
-    result.modelRefreshResult = buildSkippedModelRefreshResult(input.accountId);
+    const modelRefreshResult = await runStep(() => refreshModelsForAccount(
+      input.accountId,
+      { allowInactive: input.allowInactiveModelRefresh === true },
+    ));
+    if (modelRefreshResult) {
+      result.modelRefreshResult = modelRefreshResult;
+      result.refreshedModels = modelRefreshResult.refreshed === true && modelRefreshResult.status === 'success';
+    } else {
+      result.modelRefreshResult = buildSkippedModelRefreshResult(input.accountId);
+    }
   }
 
   if (input.rebuildRoutes) {
-    result.rebuildResult = buildDisabledRouteRebuildResult();
+    const rebuildResult = await runStep(() => rebuildTokenRoutesFromAvailability());
+    if (rebuildResult) {
+      result.rebuildResult = rebuildResult;
+      result.rebuiltRoutes = true;
+    } else {
+      result.rebuildResult = buildDisabledRouteRebuildResult();
+    }
   }
 
   return result;

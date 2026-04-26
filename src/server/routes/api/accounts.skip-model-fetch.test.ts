@@ -79,14 +79,12 @@ describe('accounts skipModelFetch behavior', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    // getModels should NOT be called when skipModelFetch is true
     expect(getModelsMock).toHaveBeenCalledTimes(0);
 
     const accounts = await db.select().from(schema.accounts).all();
     expect(accounts).toHaveLength(1);
     expect(accounts[0]?.apiToken).toBe('sk-test-skip-fetch');
-    
-    // Model availability should be empty initially (background task might not have populated it yet or failed)
+
     const models = await db.select().from(schema.modelAvailability).all();
     expect(models).toHaveLength(0);
   });
@@ -112,14 +110,10 @@ describe('accounts skipModelFetch behavior', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    // getModels is called TWICE: once for block validation, once asynchronously by refreshModelsForAccount
-    expect(getModelsMock).toHaveBeenCalledTimes(2);
+    expect(getModelsMock).toHaveBeenCalledTimes(1);
 
     const accounts = await db.select().from(schema.accounts).all();
     expect(accounts).toHaveLength(1);
     expect(accounts[0]?.apiToken).toBe('sk-test-normal-fetch');
-
-    // Model availability should be populated since getModels was called (which refreshModels uses later or handled directly)
-    // Actually our POST /api/accounts triggers rebuildTokenRoutesFromAvailability and refreshModelsForAccount asynchronously, so models might not be populated synchronously, but the mock should be called.
   });
 });

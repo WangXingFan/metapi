@@ -423,12 +423,19 @@ export default function LiteKeys() {
               style={inputStyle}
             />
           </label>
-          {!isMobile && (visibleTokenRows.length > 0 || apiKeyAccounts.length > 0) ? (
-            <ColumnVisibilityControl
-              columns={visibleTokenRows.length > 0 ? TOKEN_COLUMNS : DIRECT_KEY_COLUMNS}
-              visibleColumns={visibleTokenRows.length > 0 ? visibleTokenColumns : visibleDirectKeyColumns}
-              onToggleColumn={visibleTokenRows.length > 0 ? toggleTokenColumn : toggleDirectKeyColumn}
-              onShowAll={visibleTokenRows.length > 0 ? showAllTokenColumns : showAllDirectKeyColumns}
+          {!isMobile && visibleTokenRows.length > 0 ? (
+            <ColumnVisibilityControl<TokenColumnKey>
+              columns={TOKEN_COLUMNS}
+              visibleColumns={visibleTokenColumns}
+              onToggleColumn={toggleTokenColumn}
+              onShowAll={showAllTokenColumns}
+            />
+          ) : !isMobile && apiKeyAccounts.length > 0 ? (
+            <ColumnVisibilityControl<DirectKeyColumnKey>
+              columns={DIRECT_KEY_COLUMNS}
+              visibleColumns={visibleDirectKeyColumns}
+              onToggleColumn={toggleDirectKeyColumn}
+              onShowAll={showAllDirectKeyColumns}
             />
           ) : null}
         </div>

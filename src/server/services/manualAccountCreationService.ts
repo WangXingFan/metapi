@@ -134,26 +134,28 @@ export async function createManualAccount({
   let verifiedModels: string[] = [];
 
   if (credentialMode === 'apikey') {
-    const timeoutMessage = buildAccountVerifyTimeoutMessage();
-    const deadline = Date.now() + ACCOUNT_VERIFY_TIMEOUT_MS;
-    const models = await runWithSiteApiEndpointPool(site, (target) => {
-      const remainingMs = deadline - Date.now();
-      if (remainingMs <= 0) {
-        throw new Error(timeoutMessage);
+    if (!body.skipModelFetch) {
+      const timeoutMessage = buildAccountVerifyTimeoutMessage();
+      const deadline = Date.now() + ACCOUNT_VERIFY_TIMEOUT_MS;
+      const models = await runWithSiteApiEndpointPool(site, (target) => {
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+          throw new Error(timeoutMessage);
+        }
+        return withTimeout(
+          () => adapter.getModels(target.baseUrl, rawAccessToken, body.platformUserId),
+          remainingMs,
+          timeoutMessage,
+        );
+      });
+      verifiedModels = Array.isArray(models)
+        ? models.filter((item) => typeof item === 'string' && item.trim().length > 0)
+        : [];
+      if (verifiedModels.length === 0) {
+        const error = new Error('API Key 验证失败：未获取到可用模型，请确认站点和凭据匹配');
+        (error as Error & { requiresVerification?: boolean }).requiresVerification = true;
+        throw error;
       }
-      return withTimeout(
-        () => adapter.getModels(target.baseUrl, rawAccessToken, body.platformUserId),
-        remainingMs,
-        timeoutMessage,
-      );
-    });
-    verifiedModels = Array.isArray(models)
-      ? models.filter((item) => typeof item === 'string' && item.trim().length > 0)
-      : [];
-    if (verifiedModels.length === 0) {
-      const error = new Error('API Key 验证失败：未获取到可用模型，请确认站点和凭据匹配');
-      (error as Error & { requiresVerification?: boolean }).requiresVerification = true;
-      throw error;
     }
 
     tokenType = 'apikey';
