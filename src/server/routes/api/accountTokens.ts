@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { db, schema } from '../../db/index.js';
 import { insertAndGetById } from '../../db/insertHelpers.js';
 import {
@@ -412,6 +412,7 @@ async function executeSyncAllAccountTokens() {
   const rows = await db.select().from(schema.accounts)
     .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
     .where(eq(schema.accounts.status, 'active'))
+    .orderBy(asc(schema.accounts.sortOrder), asc(schema.accounts.id))
     .all();
 
   const results: SyncExecutionResult[] = [];

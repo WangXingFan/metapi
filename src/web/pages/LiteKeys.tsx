@@ -37,6 +37,11 @@ type AccountItem = {
   } | null;
 };
 
+type SiteOption = {
+  id: number;
+  name: string;
+};
+
 type TokenItem = {
   id: number;
   accountId: number;
@@ -89,6 +94,7 @@ export default function LiteKeys() {
   const toast = useToast();
   const location = useLocation();
   const isMobile = useIsMobile();
+  const [sites, setSites] = useState<SiteOption[]>([]);
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [tokens, setTokens] = useState<TokenItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,6 +122,16 @@ export default function LiteKeys() {
         api.getAccountsSnapshot(),
         api.getAccountTokens(),
       ]);
+      setSites(
+        Array.isArray(snapshot?.sites)
+          ? snapshot.sites
+            .filter((site): site is SiteOption => typeof site?.id === "number")
+            .map((site) => ({
+              id: site.id,
+              name: site.name || `站点 ${site.id}`,
+            }))
+          : [],
+      );
       setAccounts(
         filterOutOauthAccounts(Array.isArray(snapshot?.accounts) ? snapshot.accounts : []),
       );
@@ -141,28 +157,21 @@ export default function LiteKeys() {
   }, [requestedAccountId, requestedSiteId]);
 
   const siteOptions = useMemo(() => {
-    const deduped = new Map<number, { id: number; name: string }>();
+    const activeSiteIds = new Set<number>();
     for (const account of accounts) {
-      if (!account.site?.id) continue;
-      if (!deduped.has(account.site.id)) {
-        deduped.set(account.site.id, {
-          id: account.site.id,
-          name: account.site.name || `站点 ${account.site.id}`,
-        });
+      if (account.site?.id) {
+        activeSiteIds.add(account.site.id);
       }
     }
-    return Array.from(deduped.values()).sort((left, right) =>
-      left.name.localeCompare(right.name),
-    );
-  }, [accounts]);
+    return sites.filter((site) => activeSiteIds.has(site.id));
+  }, [accounts, sites]);
 
   const availableAccounts = useMemo(() => {
     return accounts
       .filter((account) => {
         if (siteFilter > 0 && account.site?.id !== siteFilter) return false;
         return true;
-      })
-      .sort((left, right) => resolveAccountName(left).localeCompare(resolveAccountName(right)));
+      });
   }, [accounts, siteFilter]);
 
   const filteredAccounts = useMemo(() => {
@@ -187,11 +196,6 @@ export default function LiteKeys() {
       const bucket = map.get(token.accountId) || [];
       bucket.push(token);
       map.set(token.accountId, bucket);
-    }
-    for (const bucket of map.values()) {
-      bucket.sort((left, right) => {
-        return String(left.name || "").localeCompare(String(right.name || ""));
-      });
     }
     return map;
   }, [tokens]);
@@ -360,9 +364,6 @@ export default function LiteKeys() {
       <div className="page-header">
         <div>
           <h2 className="page-title">账号 Key</h2>
-          <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginTop: 6 }}>
-            这里集中处理两类 key：Session 账户同步出来的站点 key，以及直接导入的 API Key 连接。
-          </div>
         </div>
         <RefreshButton onRefresh={load} refreshing={loading} />
       </div>

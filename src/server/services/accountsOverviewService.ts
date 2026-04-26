@@ -1,4 +1,4 @@
-import { and, eq, gte, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gte, lt, sql } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
 import {
   getCredentialModeFromExtraConfig,
@@ -105,8 +105,11 @@ async function loadAccountsSnapshotPayload(): Promise<AccountsSnapshotPayload> {
       .select()
       .from(schema.accounts)
       .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
+      .orderBy(asc(schema.accounts.sortOrder), asc(schema.accounts.id))
       .all(),
-    db.select().from(schema.sites).all(),
+    db.select().from(schema.sites)
+      .orderBy(asc(schema.sites.sortOrder), asc(schema.sites.id))
+      .all(),
   ]);
 
   const { localDay, startUtc, endUtc } = getLocalDayRangeUtc();

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api.js";
 import CenteredModal from "../components/CenteredModal.js";
@@ -91,6 +91,16 @@ const SITE_COLUMNS: ColumnOption<SiteColumnKey>[] = [
   { key: "actions", label: "操作" },
 ];
 
+const siteNameButtonStyle: React.CSSProperties = {
+  padding: 0,
+  border: "none",
+  background: "none",
+  font: "inherit",
+  color: "var(--color-primary)",
+  cursor: "pointer",
+  textAlign: "left",
+};
+
 export default function LiteSites() {
   const toast = useToast();
   const navigate = useNavigate();
@@ -119,14 +129,13 @@ export default function LiteSites() {
     void load();
   }, []);
 
-  const sortedSites = useMemo(
-    () =>
-      [...sites].sort((left, right) =>
-        String(left.name || "").localeCompare(String(right.name || "")),
-      ),
-    [sites],
-  );
+  const openSiteAccounts = (siteId: number) => {
+    navigate(`/accounts?siteId=${siteId}`);
+  };
 
+  const openSiteAccountCreate = (siteId: number) => {
+    navigate(`/accounts?siteId=${siteId}&create=1`);
+  };
 
   const openCreate = () => {
     setEditingSite(null);
@@ -195,7 +204,7 @@ export default function LiteSites() {
         const created = await api.addSite(payload);
         toast.success("站点已添加");
         if (created?.id) {
-          navigate(`/accounts?siteId=${created.id}&create=1`);
+          openSiteAccountCreate(created.id);
         }
       }
       closeEditor();
@@ -245,9 +254,6 @@ export default function LiteSites() {
       <div className="page-header">
         <div>
           <h2 className="page-title">站点</h2>
-          <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginTop: 6 }}>
-            这里只保留站点的基础信息维护，创建后可直接进入账户添加流程。
-          </div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <RefreshButton onRefresh={load} refreshing={loading} />
@@ -258,7 +264,7 @@ export default function LiteSites() {
       </div>
 
       <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
-        {!isMobile && sortedSites.length > 0 ? (
+        {!isMobile && sites.length > 0 ? (
           <ColumnVisibilityControl
             columns={SITE_COLUMNS}
             visibleColumns={visibleColumns}
@@ -272,17 +278,25 @@ export default function LiteSites() {
               <div key={`site-skeleton-${index}`} className="skeleton" style={{ height: 52 }} />
             ))}
           </div>
-        ) : sortedSites.length <= 0 ? (
+        ) : sites.length <= 0 ? (
           <div className="empty-state" style={{ padding: 28 }}>
             <div className="empty-state-title">暂无站点</div>
             <div className="empty-state-desc">先添加站点，再添加该站点的账户。</div>
           </div>
         ) : isMobile ? (
           <div className="mobile-card-list">
-            {sortedSites.map((site) => (
+            {sites.map((site) => (
               <MobileCard
                 key={site.id}
-                title={site.name}
+                title={(
+                  <button
+                    type="button"
+                    onClick={() => openSiteAccounts(site.id)}
+                    style={siteNameButtonStyle}
+                  >
+                    {site.name}
+                  </button>
+                )}
                 headerActions={(
                   <span className={`badge ${statusBadgeClass(site.status)}`} style={{ fontSize: 11 }}>
                     {site.status === "disabled" ? "停用" : "可用"}
@@ -290,7 +304,10 @@ export default function LiteSites() {
                 )}
                 footerActions={(
                   <>
-                    <button type="button" className="btn btn-link" onClick={() => navigate(`/accounts?siteId=${site.id}&create=1`)}>
+                    <button type="button" className="btn btn-link" onClick={() => openSiteAccounts(site.id)}>
+                      查看账号
+                    </button>
+                    <button type="button" className="btn btn-link" onClick={() => openSiteAccountCreate(site.id)}>
                       添加账户
                     </button>
                     <button type="button" className="btn btn-link" onClick={() => openEdit(site)}>
@@ -339,9 +356,19 @@ export default function LiteSites() {
                 </tr>
               </thead>
               <tbody>
-                {sortedSites.map((site) => (
+                {sites.map((site) => (
                   <tr key={site.id}>
-                    {isColumnVisible("name") ? <td style={{ fontWeight: 600 }}>{site.name}</td> : null}
+                    {isColumnVisible("name") ? (
+                      <td style={{ fontWeight: 600 }}>
+                        <button
+                          type="button"
+                          onClick={() => openSiteAccounts(site.id)}
+                          style={siteNameButtonStyle}
+                        >
+                          {site.name}
+                        </button>
+                      </td>
+                    ) : null}
                     {isColumnVisible("platform") ? (
                       <td>
                         <span className="badge badge-info">{site.platform || "自动"}</span>
@@ -376,7 +403,10 @@ export default function LiteSites() {
                     {isColumnVisible("actions") ? (
                       <td style={{ textAlign: "right" }}>
                         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-                          <button type="button" className="btn btn-link" onClick={() => navigate(`/accounts?siteId=${site.id}&create=1`)}>
+                          <button type="button" className="btn btn-link" onClick={() => openSiteAccounts(site.id)}>
+                            查看账号
+                          </button>
+                          <button type="button" className="btn btn-link" onClick={() => openSiteAccountCreate(site.id)}>
                             添加账户
                           </button>
                           <button type="button" className="btn btn-link" onClick={() => openEdit(site)}>

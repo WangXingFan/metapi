@@ -1,5 +1,6 @@
 ﻿import { and, eq, ne } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
+import { asc } from 'drizzle-orm';
 import { getInsertedRowId } from '../db/insertHelpers.js';
 import { getCredentialModeFromExtraConfig } from './accountExtraConfig.js';
 
@@ -479,7 +480,13 @@ export async function listTokensWithRelations(accountId?: number) {
   const base = db.select()
     .from(schema.accountTokens)
     .innerJoin(schema.accounts, eq(schema.accountTokens.accountId, schema.accounts.id))
-    .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id));
+    .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
+    .orderBy(
+      asc(schema.accounts.sortOrder),
+      asc(schema.accounts.id),
+      asc(schema.accountTokens.createdAt),
+      asc(schema.accountTokens.id),
+    );
 
   const rows = accountId
     ? await base.where(eq(schema.accountTokens.accountId, accountId)).all()

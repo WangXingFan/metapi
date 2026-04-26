@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { db, schema } from '../../db/index.js';
 import { insertAndGetById } from '../../db/insertHelpers.js';
 import {
@@ -858,7 +858,7 @@ export async function listOauthConnections(options: {
   const rows = await db.select().from(schema.accounts)
     .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
     .where(sql`${schema.accounts.oauthProvider} IS NOT NULL`)
-    .orderBy(desc(schema.accounts.id))
+    .orderBy(asc(schema.accounts.sortOrder), asc(schema.accounts.id))
     .limit(limit)
     .offset(offset)
     .all();

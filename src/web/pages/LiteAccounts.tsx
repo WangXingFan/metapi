@@ -282,6 +282,18 @@ export default function LiteAccounts() {
     });
   }, [accounts, search, siteFilter]);
 
+  const activeSiteLabel = useMemo(() => {
+    if (siteFilter <= 0) return "";
+    const matchedSite = sites.find((site) => site.id === siteFilter);
+    if (matchedSite) {
+      return matchedSite.platform
+        ? `${matchedSite.name} (${matchedSite.platform})`
+        : matchedSite.name;
+    }
+    const matchedAccountSite = accounts.find((account) => account.site?.id === siteFilter)?.site;
+    return matchedAccountSite?.name || `站点 #${siteFilter}`;
+  }, [accounts, siteFilter, sites]);
+
 
   const closeCreate = () => {
     setCreateOpen(false);
@@ -550,9 +562,6 @@ export default function LiteAccounts() {
       <div className="page-header">
         <div>
           <h2 className="page-title">账户</h2>
-          <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginTop: 6 }}>
-            只保留两个入口：站点登录添加账户，或直接导入 Session / API Key。
-          </div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <RefreshButton onRefresh={load} refreshing={loading} />
@@ -566,6 +575,24 @@ export default function LiteAccounts() {
       </div>
 
       <div className="card" style={{ padding: 20, display: "grid", gap: 16 }}>
+        {siteFilter > 0 ? (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 10,
+              alignItems: "center",
+              fontSize: 12,
+              color: "var(--color-text-secondary)",
+            }}
+          >
+            <span className="badge badge-info">当前站点</span>
+            <span>{activeSiteLabel}</span>
+            <span style={{ color: "var(--color-text-muted)" }}>
+              {filteredAccounts.length} 个账号
+            </span>
+          </div>
+        ) : null}
         <div
           style={{
             display: "grid",

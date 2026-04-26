@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { minimatch } from 'minimatch';
 import { db, schema } from '../db/index.js';
 import { config } from '../config.js';
@@ -386,9 +386,9 @@ export function toPolicyFromView(view: Pick<DownstreamApiKeyPolicyView, 'support
 
 export async function listDownstreamApiKeys(): Promise<DownstreamApiKeyPolicyView[]> {
   return (await db.select().from(schema.downstreamApiKeys)
+    .orderBy(asc(schema.downstreamApiKeys.createdAt), asc(schema.downstreamApiKeys.id))
     .all())
-    .map((row) => toDownstreamApiKeyPolicyView(row))
-    .sort((a, b) => b.id - a.id);
+    .map((row) => toDownstreamApiKeyPolicyView(row));
 }
 
 export async function getDownstreamApiKeyById(id: number): Promise<DownstreamApiKeyPolicyView | null> {

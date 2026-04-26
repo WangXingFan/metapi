@@ -430,7 +430,9 @@ export async function sitesRoutes(app: FastifyInstance) {
 
   // List all sites
   app.get('/api/sites', async () => {
-    const siteRows = await db.select().from(schema.sites).all();
+    const siteRows = await db.select().from(schema.sites)
+      .orderBy(asc(schema.sites.sortOrder), asc(schema.sites.id))
+      .all();
     const siteRowsWithApiEndpoints = await attachSiteApiEndpoints(siteRows);
     const accountRows = await db.select({
       siteId: schema.accounts.siteId,

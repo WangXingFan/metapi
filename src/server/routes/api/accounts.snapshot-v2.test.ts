@@ -142,4 +142,68 @@ describe("accounts snapshot v2", () => {
       }),
     ]);
   });
+
+  it("returns sites and accounts in configured sort order", async () => {
+    const laterSite = await db
+      .insert(schema.sites)
+      .values({
+        name: "later-site",
+        url: "https://later-site.example.com",
+        platform: "new-api",
+        sortOrder: 1,
+      })
+      .returning()
+      .get();
+    const earlierSite = await db
+      .insert(schema.sites)
+      .values({
+        name: "earlier-site",
+        url: "https://earlier-site.example.com",
+        platform: "new-api",
+        sortOrder: 0,
+      })
+      .returning()
+      .get();
+
+    const laterAccount = await db
+      .insert(schema.accounts)
+      .values({
+        siteId: laterSite.id,
+        username: "later-account",
+        accessToken: "later-token",
+        sortOrder: 1,
+      })
+      .returning()
+      .get();
+    const earlierAccount = await db
+      .insert(schema.accounts)
+      .values({
+        siteId: earlierSite.id,
+        username: "earlier-account",
+        accessToken: "earlier-token",
+        sortOrder: 0,
+      })
+      .returning()
+      .get();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/accounts",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as {
+      accounts: Array<{ id: number; username?: string | null }>;
+      sites: Array<{ id: number; name: string }>;
+    };
+
+    expect(body.sites.map((site) => site.id)).toEqual([
+      earlierSite.id,
+      laterSite.id,
+    ]);
+    expect(body.accounts.map((account) => account.id)).toEqual([
+      earlierAccount.id,
+      laterAccount.id,
+    ]);
+  });
 });

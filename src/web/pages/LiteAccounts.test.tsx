@@ -94,4 +94,54 @@ describe('LiteAccounts', () => {
       root?.unmount();
     }
   });
+
+  it('applies the site filter from the URL before the user manually selects a site', async () => {
+    apiMock.getAccountsSnapshot.mockResolvedValue({
+      sites: [
+        { id: 1, name: 'Alpha Site', platform: 'openai' },
+        { id: 2, name: 'Beta Site', platform: 'claude' },
+      ],
+      accounts: [
+        {
+          id: 101,
+          username: 'Alpha Account',
+          credentialMode: 'session',
+          site: { id: 1, name: 'Alpha Site', url: 'https://alpha.example' },
+        },
+        {
+          id: 202,
+          username: 'Beta Account',
+          credentialMode: 'session',
+          site: { id: 2, name: 'Beta Site', url: 'https://beta.example' },
+        },
+      ],
+    });
+
+    let root!: ReactTestRenderer;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/accounts?siteId=2']}>
+            <ToastProvider>
+              <LiteAccounts />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      const siteFilterSelect = root.root.find((node) => (
+        node.type === 'select'
+        && node.props.value === 2
+      ));
+
+      expect(siteFilterSelect).toBeTruthy();
+      expect(collectText(root.root)).toContain('当前站点');
+      expect(collectText(root.root)).toContain('Beta Site (claude)');
+      expect(collectText(root.root)).toContain('Beta Account');
+      expect(collectText(root.root)).not.toContain('Alpha Account');
+    } finally {
+      root?.unmount();
+    }
+  });
 });

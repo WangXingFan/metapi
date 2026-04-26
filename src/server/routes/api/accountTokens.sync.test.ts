@@ -528,6 +528,65 @@ describe('account tokens sync routes with site status', () => {
     expect(response.json()).toEqual([]);
   });
 
+  it('lists account tokens in account sort order and token creation order', async () => {
+    const first = await seedAccount({ siteStatus: 'active' });
+    const second = await seedAccount({ siteStatus: 'active' });
+
+    await db.update(schema.accounts)
+      .set({ sortOrder: 1 })
+      .where(eq(schema.accounts.id, first.account.id))
+      .run();
+    await db.update(schema.accounts)
+      .set({ sortOrder: 0 })
+      .where(eq(schema.accounts.id, second.account.id))
+      .run();
+
+    await db.insert(schema.accountTokens).values([
+      {
+        accountId: first.account.id,
+        name: 'z-last-by-name',
+        token: 'sk-first-oldest',
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        accountId: first.account.id,
+        name: 'a-first-by-name',
+        token: 'sk-first-newest',
+        enabled: true,
+        isDefault: false,
+        createdAt: '2026-01-02T00:00:00.000Z',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      },
+      {
+        accountId: second.account.id,
+        name: 'middle-account',
+        token: 'sk-second-only',
+        enabled: true,
+        isDefault: true,
+        createdAt: '2026-01-03T00:00:00.000Z',
+        updatedAt: '2026-01-03T00:00:00.000Z',
+      },
+    ]).run();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/account-tokens',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect((response.json() as Array<{ accountId: number; name: string }>).map((row) => ({
+      accountId: row.accountId,
+      name: row.name,
+    }))).toEqual([
+      { accountId: second.account.id, name: 'middle-account' },
+      { accountId: first.account.id, name: 'z-last-by-name' },
+      { accountId: first.account.id, name: 'a-first-by-name' },
+    ]);
+  });
+
   it('sync-all skips disabled-site accounts and syncs active-site accounts', async () => {
     const disabled = await seedAccount({ siteStatus: 'disabled' });
     const active = await seedAccount({ siteStatus: 'active' });
