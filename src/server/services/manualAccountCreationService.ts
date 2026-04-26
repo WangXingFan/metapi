@@ -10,6 +10,7 @@ import {
 } from './accountExtraConfig.js';
 import { type AccountCreatePayload } from '../contracts/accountsRoutePayloads.js';
 import { convergeAccountMutation } from './accountMutationWorkflow.js';
+import { runWithSiteApiEndpointPool } from './siteApiEndpointService.js';
 
 const ACCOUNT_VERIFY_TIMEOUT_MS = 10_000;
 
@@ -133,11 +134,19 @@ export async function createManualAccount({
   let verifiedModels: string[] = [];
 
   if (credentialMode === 'apikey') {
-    const models = await withTimeout(
-      () => adapter.getModels(site.url, rawAccessToken, body.platformUserId),
-      ACCOUNT_VERIFY_TIMEOUT_MS,
-      buildAccountVerifyTimeoutMessage(),
-    );
+    const timeoutMessage = buildAccountVerifyTimeoutMessage();
+    const deadline = Date.now() + ACCOUNT_VERIFY_TIMEOUT_MS;
+    const models = await runWithSiteApiEndpointPool(site, (target) => {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        throw new Error(timeoutMessage);
+      }
+      return withTimeout(
+        () => adapter.getModels(target.baseUrl, rawAccessToken, body.platformUserId),
+        remainingMs,
+        timeoutMessage,
+      );
+    });
     verifiedModels = Array.isArray(models)
       ? models.filter((item) => typeof item === 'string' && item.trim().length > 0)
       : [];
