@@ -14,11 +14,14 @@ describe('docker workflows', () => {
     expect(releaseWorkflow).toContain('"${tag}-armv7"');
   });
 
-  it('derives Docker Hub image names from the configured username secret', () => {
+  it('publishes to GHCR and treats Docker Hub as optional', () => {
     const releaseWorkflow = readFileSync(resolve(process.cwd(), '.github/workflows/release.yml'), 'utf8');
 
-    expect(releaseWorkflow).toContain('DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/metapi');
+    expect(releaseWorkflow).toContain('ghcr.io/${{ github.repository }}');
+    expect(releaseWorkflow).toContain('Docker Hub secrets missing; publishing GHCR only.');
+    expect(releaseWorkflow).toContain("if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''");
     expect(releaseWorkflow).not.toContain('1467078763/metapi');
+    expect(releaseWorkflow).not.toContain('Missing Docker Hub secrets: DOCKERHUB_USERNAME / DOCKERHUB_TOKEN');
   });
 
   it('uses an armv7-capable node base image in the Dockerfile', () => {
