@@ -27,6 +27,8 @@ type AccountItem = {
   credentialMode?: "session" | "apikey" | string;
   checkinEnabled?: boolean;
   balance?: number | null;
+  todaySpend?: number | null;
+  todayReward?: number | null;
   createdAt?: string | null;
   updatedAt?: string | null;
   apiToken?: string | null;
@@ -136,6 +138,10 @@ function canAccountCheckin(account: AccountItem): boolean {
   return account.credentialMode !== "apikey" && account.capabilities?.canCheckin === true;
 }
 
+function canRefreshAccountBalance(account: AccountItem): boolean {
+  return account.capabilities?.canRefreshBalance === true;
+}
+
 function canRebindAccount(account: AccountItem): boolean {
   return account.status === "expired" && account.credentialMode !== "apikey";
 }
@@ -147,6 +153,64 @@ function formatAccountBalance(value: unknown): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+function resolvePositiveAmount(value: unknown): number | null {
+  const amount = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return amount;
+}
+
+function formatSignedBalanceDelta(value: unknown): string | null {
+  const amount = resolvePositiveAmount(value);
+  if (amount === null) return null;
+  return `+${formatAccountBalance(amount)}`;
+}
+
+function formatSpentBalanceDelta(value: unknown): string | null {
+  const amount = resolvePositiveAmount(value);
+  if (amount === null) return null;
+  return `-${formatAccountBalance(amount)}`;
+}
+
+function BalanceDisplay({ account }: { account: AccountItem }) {
+  const rewardText = formatSignedBalanceDelta(account.todayReward);
+  const spendText = formatSpentBalanceDelta(account.todaySpend);
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
+      <span style={monoTextStyle}>{formatAccountBalance(account.balance)}</span>
+      {rewardText || spendText ? (
+        <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+          {rewardText ? (
+            <span
+              style={{
+                color: "var(--color-success)",
+                fontSize: 12,
+                fontWeight: 700,
+                lineHeight: 1.2,
+              }}
+              title="今日签到增加的余额"
+            >
+              {rewardText}
+            </span>
+          ) : null}
+          {spendText ? (
+            <span
+              style={{
+                color: "var(--color-danger)",
+                fontSize: 12,
+                fontWeight: 700,
+                lineHeight: 1.2,
+              }}
+              title="今日消耗的余额"
+            >
+              {spendText}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 type AccountColumnKey = "account" | "site" | "type" | "status" | "balance" | "checkin" | "updatedAt" | "actions";
@@ -477,12 +541,17 @@ export default function LiteAccounts() {
 
   const toggleCheckin = async (account: AccountItem) => {
     setActionId(`checkin-${account.id}`);
+    const nextCheckinEnabled = !account.checkinEnabled;
     try {
       await api.updateAccount(account.id, {
-        checkinEnabled: !account.checkinEnabled,
+        checkinEnabled: nextCheckinEnabled,
       });
+      setAccounts((current) =>
+        current.map((item) =>
+          item.id === account.id ? { ...item, checkinEnabled: nextCheckinEnabled } : item,
+        ),
+      );
       toast.success(account.checkinEnabled ? "已关闭签到" : "已开启签到");
-      await load();
     } catch (error: any) {
       toast.error(error?.message || "更新签到状态失败");
     } finally {
@@ -512,6 +581,29 @@ export default function LiteAccounts() {
       toast.success("签到已执行");
     } catch (error: any) {
       toast.error(error?.message || "执行签到失败");
+    } finally {
+      setActionId("");
+    }
+  };
+
+  const refreshAccountBalance = async (account: AccountItem) => {
+    setActionId(`balance-${account.id}`);
+    try {
+      const result = await api.refreshBalance(account.id);
+      setAccounts((current) =>
+        current.map((item) =>
+          item.id === account.id
+            ? {
+                ...item,
+                balance: typeof result?.balance === "number" ? result.balance : item.balance,
+                updatedAt: new Date().toISOString(),
+              }
+            : item,
+        ),
+      );
+      toast.success("余额已刷新");
+    } catch (error: any) {
+      toast.error(error?.message || "刷新余额失败");
     } finally {
       setActionId("");
     }
@@ -681,6 +773,16 @@ export default function LiteAccounts() {
                         签到
                       </button>
                     ) : null}
+                    {canRefreshAccountBalance(account) ? (
+                      <button
+                        type="button"
+                        className="btn btn-link"
+                        onClick={() => void refreshAccountBalance(account)}
+                        disabled={actionId === `balance-${account.id}`}
+                      >
+                        {actionId === `balance-${account.id}` ? "刷新中..." : "刷新余额"}
+                      </button>
+                    ) : null}
                     <button type="button" className="btn btn-link" onClick={() => void toggleStatus(account)}>
                       {account.status === "disabled" ? "启用" : "停用"}
                     </button>
@@ -695,7 +797,7 @@ export default function LiteAccounts() {
                   label="类型"
                   value={account.credentialMode === "apikey" ? "API Key 连接" : "Session 账户"}
                 />
-                <MobileField label="余额" value={formatAccountBalance(account.balance)} />
+                <MobileField label="余额" value={<BalanceDisplay account={account} />} />
                 <MobileField
                   label="签到"
                   value={
@@ -774,7 +876,7 @@ export default function LiteAccounts() {
                     ) : null}
                     {isColumnVisible("balance") ? (
                       <td>
-                        <span style={monoTextStyle}>{formatAccountBalance(account.balance)}</span>
+                        <BalanceDisplay account={account} />
                       </td>
                     ) : null}
                     {isColumnVisible("checkin") ? (
@@ -826,6 +928,16 @@ export default function LiteAccounts() {
                               disabled={actionId === `run-${account.id}`}
                             >
                               {actionId === `run-${account.id}` ? "执行中..." : "签到"}
+                            </button>
+                          ) : null}
+                          {canRefreshAccountBalance(account) ? (
+                            <button
+                              type="button"
+                              className="btn btn-link"
+                              onClick={() => void refreshAccountBalance(account)}
+                              disabled={actionId === `balance-${account.id}`}
+                            >
+                              {actionId === `balance-${account.id}` ? "刷新中..." : "刷新余额"}
                             </button>
                           ) : null}
                           <button type="button" className="btn btn-link" onClick={() => void toggleStatus(account)}>
