@@ -221,6 +221,12 @@ export default function LiteKeys() {
       ),
     [sessionAccounts, tokenMap],
   );
+  const selectedSessionAccount = useMemo(() => {
+    if (accountFilter <= 0) return null;
+    return filteredAccounts.find((account) => (
+      account.id === accountFilter && account.credentialMode !== "apikey"
+    )) || null;
+  }, [accountFilter, filteredAccounts]);
 
 
   const syncTokens = async (account: AccountItem) => {
@@ -424,7 +430,26 @@ export default function LiteKeys() {
               style={inputStyle}
             />
           </label>
-          {!isMobile && visibleTokenRows.length > 0 ? (
+          {selectedSessionAccount ? (
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              {!isMobile && visibleTokenRows.length > 0 ? (
+                <ColumnVisibilityControl<TokenColumnKey>
+                  columns={TOKEN_COLUMNS}
+                  visibleColumns={visibleTokenColumns}
+                  onToggleColumn={toggleTokenColumn}
+                  onShowAll={showAllTokenColumns}
+                />
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => void syncTokens(selectedSessionAccount)}
+                disabled={actionId === `sync-${selectedSessionAccount.id}`}
+              >
+                {actionId === `sync-${selectedSessionAccount.id}` ? "同步中..." : "同步当前账户"}
+              </button>
+            </div>
+          ) : !isMobile && visibleTokenRows.length > 0 ? (
             <ColumnVisibilityControl<TokenColumnKey>
               columns={TOKEN_COLUMNS}
               visibleColumns={visibleTokenColumns}
@@ -705,8 +730,25 @@ export default function LiteKeys() {
 
             {visibleTokenRows.length <= 0 && apiKeyAccounts.length <= 0 ? (
               <div className="empty-state" style={{ padding: 28 }}>
-                <div className="empty-state-title">暂无可用 key</div>
-                <div className="empty-state-desc">当前筛选条件下没有已保存的 key。</div>
+                <div className="empty-state-title">
+                  {selectedSessionAccount ? `${resolveAccountName(selectedSessionAccount)} 暂无可用 key` : "暂无可用 key"}
+                </div>
+                <div className="empty-state-desc">
+                  {selectedSessionAccount
+                    ? "该账户当前没有已保存的 key，可以重新同步上游站点。"
+                    : "当前筛选条件下没有已保存的 key。"}
+                </div>
+                {selectedSessionAccount ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => void syncTokens(selectedSessionAccount)}
+                    disabled={actionId === `sync-${selectedSessionAccount.id}`}
+                    style={{ justifySelf: "center", marginTop: 12 }}
+                  >
+                    {actionId === `sync-${selectedSessionAccount.id}` ? "同步中..." : "同步当前账户"}
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </>
