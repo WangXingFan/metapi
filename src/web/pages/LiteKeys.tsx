@@ -11,6 +11,7 @@ import { MobileCard, MobileField } from "../components/MobileCard.js";
 import RefreshButton from "../components/RefreshButton.js";
 import { useIsMobile } from "../components/useIsMobile.js";
 import { useToast } from "../components/Toast.js";
+import { useConfirm } from "../components/ConfirmDialog.js";
 import { formatDateTimeLocal } from "./helpers/checkinLogTime.js";
 import {
   copyText,
@@ -92,6 +93,7 @@ const DIRECT_KEY_COLUMNS: ColumnOption<DirectKeyColumnKey>[] = [
 
 export default function LiteKeys() {
   const toast = useToast();
+  const confirm = useConfirm();
   const location = useLocation();
   const isMobile = useIsMobile();
   const [sites, setSites] = useState<SiteOption[]>([]);
@@ -281,10 +283,12 @@ export default function LiteKeys() {
 
   const deleteToken = async (token: TokenItem) => {
     const tokenName = token.name || "未命名 key";
-    const confirmed =
-      typeof window === "undefined" || typeof window.confirm !== "function"
-        ? true
-        : window.confirm(`确定删除 key“${tokenName}”吗？会优先同步删除上游站点 key。`);
+    const confirmed = await confirm({
+      title: "删除账号 Key",
+      message: `确定删除 key“${tokenName}”吗？将优先同步删除上游站点 key。`,
+      confirmText: "删除",
+      tone: "danger",
+    });
     if (!confirmed) return;
 
     setActionId(`delete-token-${token.id}`);
@@ -294,10 +298,12 @@ export default function LiteKeys() {
       await load();
     } catch (error: any) {
       const message = error?.message || "删除 key 失败";
-      const localConfirmed =
-        typeof window === "undefined" || typeof window.confirm !== "function"
-          ? true
-          : window.confirm(`删除上游 key 失败：${message}\n是否仅删除本地记录？`);
+      const localConfirmed = await confirm({
+        title: "上游删除失败",
+        message: `删除上游 key 失败：${message}\n是否仅删除本地记录？`,
+        confirmText: "仅删除本地",
+        tone: "warning",
+      });
       if (!localConfirmed) {
         toast.error(message);
         return;
@@ -366,10 +372,11 @@ export default function LiteKeys() {
   } = useColumnVisibility("metapi.liteKeys.direct.columns", DIRECT_KEY_COLUMNS);
 
   return (
-    <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div className="animate-fade-in stack-md">
       <div className="page-header">
         <div>
           <h2 className="page-title">账号 Key</h2>
+          <p className="page-subtitle">同步、补全、复制站点账号下挂载的 API Key</p>
         </div>
         <RefreshButton onRefresh={load} refreshing={loading} />
       </div>

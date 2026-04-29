@@ -371,8 +371,11 @@ export default function CheckinLog() {
   return (
     <div className="animate-fade-in">
       <div className="page-header">
-        <h2 className="page-title">{tr("签到记录")}</h2>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
+        <div>
+          <h2 className="page-title">{tr("签到记录")}</h2>
+          <p className="page-subtitle">{tr("执行单账号或批量签到，并查看签到日志")}</p>
+        </div>
+        <div className="page-header-actions">
           <RefreshButton onRefresh={handleRefresh} refreshing={loading} />
           {canStopSpread ? (
             <button

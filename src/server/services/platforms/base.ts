@@ -113,7 +113,7 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
   abstract readonly platformName: string;
 
   abstract detect(url: string): Promise<boolean>;
-  abstract checkin(baseUrl: string, accessToken: string): Promise<CheckinResult>;
+  abstract checkin(baseUrl: string, accessToken: string, platformUserId?: number): Promise<CheckinResult>;
   abstract getBalance(baseUrl: string, accessToken: string): Promise<BalanceInfo>;
   abstract getModels(baseUrl: string, token: string, platformUserId?: number): Promise<string[]>;
 

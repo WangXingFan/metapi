@@ -26,3 +26,9 @@ docker/.env
 docs/plan/
 docs/plans/
 .ace-tool/
+
+# Local agent / spec-workflow session state
+.claude/
+.spec-workflow/approvals/
+.spec-workflow/archive/
+.spec-workflow/specs/

@@ -49,7 +49,7 @@ export class OneApiAdapter extends BasePlatformAdapter {
     }
   }
 
-  async checkin(baseUrl: string, accessToken: string): Promise<CheckinResult> {
+  async checkin(baseUrl: string, accessToken: string, _platformUserId?: number): Promise<CheckinResult> {
     try {
       const res = await this.fetchJson<any>(`${baseUrl}/api/user/checkin`, {
         method: 'POST',

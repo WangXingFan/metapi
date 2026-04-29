@@ -11,7 +11,7 @@ export class DoneHubAdapter extends OneHubAdapter {
 
   // DoneHub deployments generally do not expose /api/user/checkin.
   // Mark as unsupported so higher-level logic records it as skipped instead of failed.
-  override async checkin(_baseUrl: string, _accessToken: string): Promise<CheckinResult> {
+  override async checkin(_baseUrl: string, _accessToken: string, _platformUserId?: number): Promise<CheckinResult> {
     return { success: false, message: 'checkin endpoint not found' };
   }
 

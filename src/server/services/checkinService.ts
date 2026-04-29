@@ -182,6 +182,7 @@ export async function checkinAccount(accountId: number, options?: { skipEvent?: 
   let result = await withAccountProxyOverride(accountProxyUrl,
     () => adapter.checkin(site.url, activeAccessToken, platformUserId));
 
+  // Auto-relogin if token expired
   if (!result.success && shouldAttemptAutoRelogin(result.message)) {
     const refreshedAccessToken = await tryAutoRelogin(account, site);
     if (refreshedAccessToken) {

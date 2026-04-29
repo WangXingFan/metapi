@@ -11,6 +11,8 @@ import { MobileCard, MobileField } from "../components/MobileCard.js";
 import RefreshButton from "../components/RefreshButton.js";
 import { useIsMobile } from "../components/useIsMobile.js";
 import { useToast } from "../components/Toast.js";
+import { useConfirm } from "../components/ConfirmDialog.js";
+import RowActions from "../components/RowActions.js";
 import { formatDateTimeLocal } from "./helpers/checkinLogTime.js";
 import { fieldLabelStyle, inputStyle, monoTextStyle, parsePositiveInt } from "./lite/shared.js";
 
@@ -228,6 +230,7 @@ const ACCOUNT_COLUMNS: ColumnOption<AccountColumnKey>[] = [
 
 export default function LiteAccounts() {
   const toast = useToast();
+  const confirm = useConfirm();
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
@@ -610,10 +613,12 @@ export default function LiteAccounts() {
   };
 
   const deleteAccount = async (account: AccountItem) => {
-    const confirmed =
-      typeof window === "undefined" || typeof window.confirm !== "function"
-        ? true
-        : window.confirm(`确定删除账户“${resolveAccountName(account)}”吗？`);
+    const confirmed = await confirm({
+      title: "删除账户",
+      message: `确定删除账户“${resolveAccountName(account)}”吗？该账户下的所有 Key 也会一并清除。`,
+      confirmText: "删除",
+      tone: "danger",
+    });
     if (!confirmed) return;
 
     setActionId(`delete-${account.id}`);
@@ -650,12 +655,13 @@ export default function LiteAccounts() {
   }
 
   return (
-    <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div className="animate-fade-in stack-md">
       <div className="page-header">
         <div>
           <h2 className="page-title">账户</h2>
+          <p className="page-subtitle">通过站点登录或导入 Session / API Key 添加账户</p>
         </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div className="page-header-actions">
           <RefreshButton onRefresh={load} refreshing={loading} />
           <button type="button" className="btn btn-ghost" onClick={() => void openCheckinSettings()}>
             签到设置
@@ -734,9 +740,25 @@ export default function LiteAccounts() {
             ))}
           </div>
         ) : filteredAccounts.length <= 0 ? (
-          <div className="empty-state" style={{ padding: 28 }}>
-            <div className="empty-state-title">暂无账户</div>
-            <div className="empty-state-desc">先添加站点，再为站点补充账户或 API Key。</div>
+          <div className="empty-state">
+            <div className="empty-state-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M16 19v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 17.5V19" />
+                <circle cx="10" cy="8" r="3.5" />
+                <path d="M20 19v-1.2a3 3 0 0 0-2.4-2.94" />
+                <path d="M16 5.2a3 3 0 0 1 0 5.6" />
+              </svg>
+            </div>
+            <div className="empty-state-title">还没有账户</div>
+            <div className="empty-state-desc">从站点登录或直接导入 Session / API Key，把账户挂在站点下统一管理。</div>
+            <div className="empty-state-actions">
+              <button type="button" className="btn btn-primary" onClick={openCreate}>
+                添加账户
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => navigate('/sites')}>
+                查看站点
+              </button>
+            </div>
           </div>
         ) : isMobile ? (
           <div className="mobile-card-list">
@@ -750,46 +772,47 @@ export default function LiteAccounts() {
                   </span>
                 )}
                 footerActions={(
-                  <>
-                    <button type="button" className="btn btn-link" onClick={() => navigate(`/keys?accountId=${account.id}`)}>
-                      查看 Key
-                    </button>
-                    {canRebindAccount(account) ? (
-                      <button
-                        type="button"
-                        className="btn btn-link"
-                        onClick={() => openRebind(account)}
-                      >
-                        重新绑定
-                      </button>
-                    ) : null}
-                    {canAccountCheckin(account) ? (
-                      <button
-                        type="button"
-                        className="btn btn-link"
-                        onClick={() => void runCheckin(account)}
-                        disabled={actionId === `run-${account.id}`}
-                      >
-                        签到
-                      </button>
-                    ) : null}
-                    {canRefreshAccountBalance(account) ? (
-                      <button
-                        type="button"
-                        className="btn btn-link"
-                        onClick={() => void refreshAccountBalance(account)}
-                        disabled={actionId === `balance-${account.id}`}
-                      >
-                        {actionId === `balance-${account.id}` ? "刷新中..." : "刷新余额"}
-                      </button>
-                    ) : null}
-                    <button type="button" className="btn btn-link" onClick={() => void toggleStatus(account)}>
-                      {account.status === "disabled" ? "启用" : "停用"}
-                    </button>
-                    <button type="button" className="btn btn-link btn-link-danger" onClick={() => void deleteAccount(account)}>
-                      删除
-                    </button>
-                  </>
+                  <RowActions
+                    align="left"
+                    inline={[{
+                      key: "view-keys",
+                      label: "查看 Key",
+                      onClick: () => navigate(`/keys?accountId=${account.id}`),
+                    }]}
+                    menu={[
+                      {
+                        key: "rebind",
+                        label: "重新绑定",
+                        hidden: !canRebindAccount(account),
+                        onClick: () => openRebind(account),
+                      },
+                      {
+                        key: "checkin",
+                        label: "签到",
+                        hidden: !canAccountCheckin(account),
+                        disabled: actionId === `run-${account.id}`,
+                        onClick: () => void runCheckin(account),
+                      },
+                      {
+                        key: "balance",
+                        label: actionId === `balance-${account.id}` ? "刷新中..." : "刷新余额",
+                        hidden: !canRefreshAccountBalance(account),
+                        disabled: actionId === `balance-${account.id}`,
+                        onClick: () => void refreshAccountBalance(account),
+                      },
+                      {
+                        key: "toggle",
+                        label: account.status === "disabled" ? "启用" : "停用",
+                        onClick: () => void toggleStatus(account),
+                      },
+                      {
+                        key: "delete",
+                        label: "删除",
+                        danger: true,
+                        onClick: () => void deleteAccount(account),
+                      },
+                    ]}
+                  />
                 )}
               >
                 <MobileField label="站点" value={account.site?.name || "-"} />
@@ -907,46 +930,47 @@ export default function LiteAccounts() {
                     ) : null}
                     {isColumnVisible("actions") ? (
                       <td style={{ textAlign: "right" }}>
-                        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-                          <button type="button" className="btn btn-link" onClick={() => navigate(`/keys?accountId=${account.id}`)}>
-                            查看 Key
-                          </button>
-                          {canRebindAccount(account) ? (
-                            <button
-                              type="button"
-                              className="btn btn-link"
-                              onClick={() => openRebind(account)}
-                            >
-                              重新绑定
-                            </button>
-                          ) : null}
-                          {canAccountCheckin(account) ? (
-                            <button
-                              type="button"
-                              className="btn btn-link"
-                              onClick={() => void runCheckin(account)}
-                              disabled={actionId === `run-${account.id}`}
-                            >
-                              {actionId === `run-${account.id}` ? "执行中..." : "签到"}
-                            </button>
-                          ) : null}
-                          {canRefreshAccountBalance(account) ? (
-                            <button
-                              type="button"
-                              className="btn btn-link"
-                              onClick={() => void refreshAccountBalance(account)}
-                              disabled={actionId === `balance-${account.id}`}
-                            >
-                              {actionId === `balance-${account.id}` ? "刷新中..." : "刷新余额"}
-                            </button>
-                          ) : null}
-                          <button type="button" className="btn btn-link" onClick={() => void toggleStatus(account)}>
-                            {account.status === "disabled" ? "启用" : "停用"}
-                          </button>
-                          <button type="button" className="btn btn-link btn-link-danger" onClick={() => void deleteAccount(account)}>
-                            删除
-                          </button>
-                        </div>
+                        <RowActions
+                          align="right"
+                          inline={[{
+                            key: "view-keys",
+                            label: "查看 Key",
+                            onClick: () => navigate(`/keys?accountId=${account.id}`),
+                          }]}
+                          menu={[
+                            {
+                              key: "rebind",
+                              label: "重新绑定",
+                              hidden: !canRebindAccount(account),
+                              onClick: () => openRebind(account),
+                            },
+                            {
+                              key: "checkin",
+                              label: actionId === `run-${account.id}` ? "执行中..." : "签到",
+                              hidden: !canAccountCheckin(account),
+                              disabled: actionId === `run-${account.id}`,
+                              onClick: () => void runCheckin(account),
+                            },
+                            {
+                              key: "balance",
+                              label: actionId === `balance-${account.id}` ? "刷新中..." : "刷新余额",
+                              hidden: !canRefreshAccountBalance(account),
+                              disabled: actionId === `balance-${account.id}`,
+                              onClick: () => void refreshAccountBalance(account),
+                            },
+                            {
+                              key: "toggle",
+                              label: account.status === "disabled" ? "启用" : "停用",
+                              onClick: () => void toggleStatus(account),
+                            },
+                            {
+                              key: "delete",
+                              label: "删除",
+                              danger: true,
+                              onClick: () => void deleteAccount(account),
+                            },
+                          ]}
+                        />
                       </td>
                     ) : null}
                   </tr>

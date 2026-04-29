@@ -47,7 +47,7 @@ export class AntigravityAdapter extends BasePlatformAdapter {
     return null;
   }
 
-  async checkin(_baseUrl: string, _accessToken: string): Promise<CheckinResult> {
+  async checkin(_baseUrl: string, _accessToken: string, _platformUserId?: number): Promise<CheckinResult> {
     return { success: false, message: 'checkin endpoint not supported' };
   }
 

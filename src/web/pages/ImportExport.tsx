@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import ModernSelect from '../components/ModernSelect.js';
 import RefreshButton from '../components/RefreshButton.js';
 import { useToast } from '../components/Toast.js';
+import { useConfirm } from '../components/ConfirmDialog.js';
 import { tr } from '../i18n.js';
 
 type BackupType = 'all' | 'accounts' | 'preferences';
@@ -277,6 +278,7 @@ function buildImportSuccessMessage(result: any): string {
 
 export default function ImportExport() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [exportingType, setExportingType] = useState<BackupType | ''>('');
   const [importing, setImporting] = useState(false);
   const [importData, setImportData] = useState('');
@@ -344,11 +346,15 @@ export default function ImportExport() {
   );
 
   const reloadWebdavConfig = async () => {
-    const confirmed = !webdavConfigDirty
-      || typeof window === 'undefined'
-      || typeof window.confirm !== 'function'
-      || window.confirm('刷新会丢弃当前未保存的 WebDAV 配置改动，确认继续？');
-    if (!confirmed) return;
+    if (webdavConfigDirty) {
+      const confirmed = await confirm({
+        title: '丢弃未保存改动',
+        message: '刷新会丢弃当前未保存的 WebDAV 配置改动，确认继续？',
+        confirmText: '继续刷新',
+        tone: 'warning',
+      });
+      if (!confirmed) return;
+    }
 
     setWebdavConfigLoading(true);
     try {
@@ -450,9 +456,12 @@ export default function ImportExport() {
       toast.error('当前 JSON 结构无法识别');
       return;
     }
-    const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
-      ? true
-      : window.confirm('导入会覆盖备份中的连接/路由/策略配置或系统设置，但会保留本机日志、公告、缓存和统计，确认继续？');
+    const confirmed = await confirm({
+      title: '确认导入备份',
+      message: '导入会覆盖备份中的连接/路由/策略配置或系统设置，但会保留本机日志、公告、缓存和统计，确认继续？',
+      confirmText: '导入',
+      tone: 'warning',
+    });
     if (!confirmed) {
       return;
     }
@@ -512,9 +521,12 @@ export default function ImportExport() {
   };
 
   const handleImportFromWebdav = async () => {
-    const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
-      ? true
-      : window.confirm('从 WebDAV 导入会覆盖备份中的连接/路由/策略配置或系统设置，但会保留本机日志、公告、缓存和统计，确认继续？');
+    const confirmed = await confirm({
+      title: '从 WebDAV 导入',
+      message: '从 WebDAV 导入会覆盖备份中的连接/路由/策略配置或系统设置，但会保留本机日志、公告、缓存和统计，确认继续？',
+      confirmText: '导入',
+      tone: 'warning',
+    });
     if (!confirmed) return;
     setWebdavAction('import');
     try {
@@ -532,12 +544,10 @@ export default function ImportExport() {
     <div className="animate-fade-in">
       <div className="page-header" style={{ alignItems: 'flex-end', marginBottom: 18 }}>
         <div>
-          <h2 className="page-title" style={{ marginBottom: 6 }}>{tr('导入 / 导出')}</h2>
-          <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
-            支持配置型备份、分区备份与手动恢复。
-          </div>
+          <h2 className="page-title">{tr('导入 / 导出')}</h2>
+          <p className="page-subtitle">支持配置型备份、分区备份与手动恢复。</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="page-header-actions">
           <RefreshButton onRefresh={reloadWebdavConfig} refreshing={webdavConfigLoading} label="刷新配置" />
           <span className="badge badge-muted" style={{ fontSize: 11 }}>Schema v2.1</span>
           <span className="badge badge-warning" style={{ fontSize: 11 }}>敏感数据请离线保管</span>

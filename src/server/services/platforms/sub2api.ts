@@ -706,6 +706,7 @@ export class Sub2ApiAdapter extends BasePlatformAdapter {
   async checkin(
     _baseUrl: string,
     _accessToken: string,
+    _platformUserId?: number,
   ): Promise<CheckinResult> {
     return { success: false, message: 'Check-in is not supported by Sub2API' };
   }

@@ -24,7 +24,7 @@ export class CodexAdapter extends BasePlatformAdapter {
     return null;
   }
 
-  async checkin(_baseUrl: string, _accessToken: string): Promise<CheckinResult> {
+  async checkin(_baseUrl: string, _accessToken: string, _platformUserId?: number): Promise<CheckinResult> {
     return { success: false, message: 'codex oauth connections do not support checkin' };
   }
 

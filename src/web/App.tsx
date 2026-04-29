@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ToastProvider } from "./components/Toast.js";
+import { ConfirmProvider } from "./components/ConfirmDialog.js";
 import TooltipLayer from "./components/TooltipLayer.js";
 import { clearAuthSession, hasValidAuthSession, persistAuthSession } from "./authSession.js";
 import { I18nProvider, useI18n } from "./i18n.js";
@@ -11,11 +12,76 @@ import LiteSites from "./pages/LiteSites.js";
 import LiteAccounts from "./pages/LiteAccounts.js";
 import LiteKeys from "./pages/LiteKeys.js";
 
-function NavIcon() {
+function NavIconBase({ children }: { children: React.ReactNode }) {
   return (
-    <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M5 12h14M12 5v14" />
+    <svg
+      className="sidebar-item-icon"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {children}
     </svg>
+  );
+}
+
+function SitesIcon() {
+  return (
+    <NavIconBase>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18" />
+    </NavIconBase>
+  );
+}
+
+function AccountsIcon() {
+  return (
+    <NavIconBase>
+      <path d="M16 19v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 17.5V19" />
+      <circle cx="10" cy="8" r="3.5" />
+      <path d="M20 19v-1.2a3 3 0 0 0-2.4-2.94" />
+      <path d="M16 5.2a3 3 0 0 1 0 5.6" />
+    </NavIconBase>
+  );
+}
+
+function KeysIcon() {
+  return (
+    <NavIconBase>
+      <circle cx="8" cy="15" r="3.5" />
+      <path d="M10.5 12.5L20 3" />
+      <path d="M16 7l3 3" />
+      <path d="M19 4l2 2" />
+    </NavIconBase>
+  );
+}
+
+function CheckinIcon() {
+  return (
+    <NavIconBase>
+      <rect x="3.5" y="5" width="17" height="15" rx="2.5" />
+      <path d="M3.5 10h17" />
+      <path d="M8 3v4M16 3v4" />
+      <path d="M9 14.5l2 2 4-4" />
+    </NavIconBase>
+  );
+}
+
+function ImportExportIcon() {
+  return (
+    <NavIconBase>
+      <path d="M8 3v10" />
+      <path d="M4.5 9.5L8 13l3.5-3.5" />
+      <path d="M16 21V11" />
+      <path d="M19.5 14.5L16 11l-3.5 3.5" />
+    </NavIconBase>
   );
 }
 
@@ -23,16 +89,16 @@ export const sidebarGroups = [
   {
     label: "核心功能",
     items: [
-      { to: "/sites", label: "站点", icon: <NavIcon /> },
-      { to: "/accounts", label: "账户", icon: <NavIcon /> },
-      { to: "/keys", label: "账号 Key", icon: <NavIcon /> },
-      { to: "/checkin", label: "签到", icon: <NavIcon /> },
-      { to: "/import-export", label: "导入导出", icon: <NavIcon /> },
+      { to: "/sites", label: "站点", icon: <SitesIcon /> },
+      { to: "/accounts", label: "账户", icon: <AccountsIcon /> },
+      { to: "/keys", label: "账号 Key", icon: <KeysIcon /> },
+      { to: "/checkin", label: "签到", icon: <CheckinIcon /> },
+      { to: "/import-export", label: "导入导出", icon: <ImportExportIcon /> },
     ],
   },
 ];
 
-const navItems = sidebarGroups[0].items.map(({ to, label }) => ({ to, label }));
+const navItems = sidebarGroups[0].items.map(({ to, label, icon }) => ({ to, label, icon }));
 const THEME_STORAGE_KEY = "metapi_theme";
 type ThemeMode = "light" | "dark";
 
@@ -269,10 +335,11 @@ function AppShell() {
           <img src="/logo.png" alt="Metapi" style={{ width: 30, height: 30, borderRadius: 8 }} />
           <span className="topbar-logo-text">Metapi Lite</span>
         </div>
-        <nav className="topbar-nav" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <nav className="topbar-nav">
           {navItems.map((item) => (
             <NavLink key={item.to} to={item.to} end className={({ isActive }) => `topbar-nav-item ${isActive ? "active" : ""}`}>
-              {t(item.label)}
+              <span className="topbar-nav-icon" aria-hidden="true">{item.icon}</span>
+              <span className="topbar-nav-label">{t(item.label)}</span>
             </NavLink>
           ))}
         </nav>
@@ -322,8 +389,10 @@ export default function App() {
   return (
     <I18nProvider>
       <ToastProvider>
-        <AppShell />
-        <TooltipLayer />
+        <ConfirmProvider>
+          <AppShell />
+          <TooltipLayer />
+        </ConfirmProvider>
       </ToastProvider>
     </I18nProvider>
   );

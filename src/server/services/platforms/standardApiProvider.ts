@@ -43,7 +43,7 @@ export abstract class StandardApiProviderAdapterBase extends BasePlatformAdapter
     return null;
   }
 
-  override async checkin(_baseUrl: string, _accessToken: string): Promise<CheckinResult> {
+  override async checkin(_baseUrl: string, _accessToken: string, _platformUserId?: number): Promise<CheckinResult> {
     return {
       success: false,
       message: this.checkinUnsupportedMessage,
