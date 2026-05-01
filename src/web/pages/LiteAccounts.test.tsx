@@ -11,6 +11,7 @@ const { apiMock } = vi.hoisted(() => ({
     updateRuntimeSettings: vi.fn(),
     updateAccount: vi.fn(),
     refreshBalance: vi.fn(),
+    rebindAccountSession: vi.fn(),
   },
 }));
 
@@ -42,6 +43,7 @@ describe('LiteAccounts', () => {
     apiMock.updateRuntimeSettings.mockResolvedValue({ success: true });
     apiMock.updateAccount.mockResolvedValue({ success: true });
     apiMock.refreshBalance.mockResolvedValue({ balance: 88 });
+    apiMock.rebindAccountSession.mockResolvedValue({ success: true });
   });
 
   it('saves the global checkin interval from the account page', async () => {
@@ -355,6 +357,75 @@ describe('LiteAccounts', () => {
 
       text = collectText(root.root);
       expect(text).toContain('session-secret-token');
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('prefills the platform user ID when rebinding an expired session account', async () => {
+    apiMock.getAccountsSnapshot.mockResolvedValue({
+      sites: [{ id: 1, name: 'Alpha Site', platform: 'newapi' }],
+      accounts: [
+        {
+          id: 101,
+          username: 'Alpha Account',
+          credentialMode: 'session',
+          status: 'expired',
+          extraConfig: JSON.stringify({ platformUserId: 7788 }),
+          site: { id: 1, name: 'Alpha Site', url: 'https://alpha.example' },
+        },
+      ],
+    });
+
+    let root!: ReactTestRenderer;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/accounts']}>
+            <ToastProvider>
+              <LiteAccounts />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      const rebindButton = root.root.find((node) => (
+        node.type === 'button'
+        && typeof node.props.onClick === 'function'
+        && collectText(node).trim() === '重新绑定'
+      ));
+
+      await act(async () => {
+        rebindButton.props.onClick();
+      });
+
+      const platformUserIdInput = root.root.find((node) => (
+        node.type === 'input'
+        && node.props.value === '7788'
+      ));
+      expect(platformUserIdInput).toBeTruthy();
+
+      const tokenTextarea = root.root.find((node) => node.type === 'textarea');
+      await act(async () => {
+        tokenTextarea.props.onChange({ target: { value: 'new-session-token' } });
+      });
+
+      const saveButton = root.root.find((node) => (
+        node.type === 'button'
+        && typeof node.props.onClick === 'function'
+        && collectText(node).trim() === '确认绑定'
+      ));
+
+      await act(async () => {
+        await saveButton.props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(apiMock.rebindAccountSession).toHaveBeenCalledWith(101, {
+        accessToken: 'new-session-token',
+        platformUserId: 7788,
+      });
     } finally {
       root?.unmount();
     }

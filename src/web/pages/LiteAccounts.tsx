@@ -471,7 +471,7 @@ export default function LiteAccounts() {
     setRebindAccount(account);
     setRebindForm({
       accessToken: "",
-      platformUserId: "",
+      platformUserId: resolvePlatformUserId(account),
     });
   };
 
