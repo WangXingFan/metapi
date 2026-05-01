@@ -295,4 +295,68 @@ describe('LiteAccounts', () => {
       root?.unmount();
     }
   });
+
+  it('opens an account credential dialog with masked access token by default', async () => {
+    apiMock.getAccountsSnapshot.mockResolvedValue({
+      sites: [{ id: 1, name: 'Alpha Site', platform: 'newapi' }],
+      accounts: [
+        {
+          id: 101,
+          username: 'Alpha Account',
+          credentialMode: 'session',
+          accessToken: 'session-secret-token',
+          extraConfig: JSON.stringify({ platformUserId: 7788 }),
+          site: { id: 1, name: 'Alpha Site', url: 'https://alpha.example' },
+        },
+      ],
+    });
+
+    let root!: ReactTestRenderer;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/accounts']}>
+            <ToastProvider>
+              <LiteAccounts />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      expect(collectText(root.root)).not.toContain('session-secret-token');
+
+      const credentialsButton = root.root.find((node) => (
+        node.type === 'button'
+        && typeof node.props.onClick === 'function'
+        && collectText(node).trim() === '查看凭据'
+      ));
+
+      await act(async () => {
+        credentialsButton.props.onClick();
+      });
+
+      let text = collectText(root.root);
+      expect(text).toContain('查看凭据');
+      expect(text).toContain('平台用户 ID');
+      expect(text).toContain('7788');
+      expect(text).toContain('sess****oken');
+      expect(text).not.toContain('session-secret-token');
+
+      const revealButton = root.root.find((node) => (
+        node.type === 'button'
+        && typeof node.props.onClick === 'function'
+        && collectText(node).trim() === '显示完整凭据'
+      ));
+
+      await act(async () => {
+        revealButton.props.onClick();
+      });
+
+      text = collectText(root.root);
+      expect(text).toContain('session-secret-token');
+    } finally {
+      root?.unmount();
+    }
+  });
 });

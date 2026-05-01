@@ -14,7 +14,14 @@ import { useToast } from "../components/Toast.js";
 import { useConfirm } from "../components/ConfirmDialog.js";
 import RowActions from "../components/RowActions.js";
 import { formatDateTimeLocal } from "./helpers/checkinLogTime.js";
-import { fieldLabelStyle, inputStyle, monoTextStyle, parsePositiveInt } from "./lite/shared.js";
+import {
+  copyText,
+  fieldLabelStyle,
+  inputStyle,
+  maskSecret,
+  monoTextStyle,
+  parsePositiveInt,
+} from "./lite/shared.js";
 
 type SiteOption = {
   id: number;
@@ -25,6 +32,7 @@ type SiteOption = {
 type AccountItem = {
   id: number;
   username?: string | null;
+  accessToken?: string | null;
   status?: string | null;
   credentialMode?: "session" | "apikey" | string;
   checkinEnabled?: boolean;
@@ -35,6 +43,7 @@ type AccountItem = {
   updatedAt?: string | null;
   apiToken?: string | null;
   oauthProvider?: string | null;
+  extraConfig?: string | Record<string, unknown> | null;
   site?: {
     id: number;
     name: string;
@@ -43,6 +52,7 @@ type AccountItem = {
   } | null;
   capabilities?: {
     canCheckin?: boolean;
+    canRefreshBalance?: boolean;
     proxyOnly?: boolean;
   } | null;
 };
@@ -146,6 +156,75 @@ function canRefreshAccountBalance(account: AccountItem): boolean {
 
 function canRebindAccount(account: AccountItem): boolean {
   return account.status === "expired" && account.credentialMode !== "apikey";
+}
+
+function parseExtraConfig(extraConfig: AccountItem["extraConfig"]): Record<string, unknown> {
+  if (!extraConfig) return {};
+  if (typeof extraConfig === "object" && !Array.isArray(extraConfig)) return extraConfig;
+  if (typeof extraConfig !== "string") return {};
+  try {
+    const parsed = JSON.parse(extraConfig) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizePositiveId(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return String(Math.trunc(value));
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isFinite(parsed) && parsed > 0) return String(parsed);
+  }
+  return "";
+}
+
+function resolvePlatformUserId(account: AccountItem): string {
+  return normalizePositiveId(parseExtraConfig(account.extraConfig).platformUserId);
+}
+
+type CredentialField = {
+  key: string;
+  label: string;
+  value: string;
+  sensitive?: boolean;
+};
+
+function buildCredentialFields(account: AccountItem): CredentialField[] {
+  const fields: CredentialField[] = [
+    {
+      key: "account-id",
+      label: "Metapi 账户 ID",
+      value: String(account.id),
+    },
+    {
+      key: "platform-user-id",
+      label: "平台用户 ID",
+      value: resolvePlatformUserId(account),
+    },
+    {
+      key: "access-token",
+      label: "Access Token / Session",
+      value: String(account.accessToken || "").trim(),
+      sensitive: true,
+    },
+  ];
+
+  const apiToken = String(account.apiToken || "").trim();
+  if (apiToken) {
+    fields.push({
+      key: "api-token",
+      label: "API Key",
+      value: apiToken,
+      sensitive: true,
+    });
+  }
+
+  return fields;
 }
 
 function formatAccountBalance(value: unknown): string {
@@ -255,6 +334,8 @@ export default function LiteAccounts() {
     platformUserId: "",
   });
   const [rebinding, setRebinding] = useState(false);
+  const [credentialAccount, setCredentialAccount] = useState<AccountItem | null>(null);
+  const [credentialsRevealed, setCredentialsRevealed] = useState(false);
 
   const requestedSiteId = useMemo(
     () => parsePositiveInt(new URLSearchParams(location.search).get("siteId")),
@@ -401,6 +482,30 @@ export default function LiteAccounts() {
       platformUserId: "",
     });
     setRebinding(false);
+  };
+
+  const openCredentials = (account: AccountItem) => {
+    setCredentialAccount(account);
+    setCredentialsRevealed(false);
+  };
+
+  const closeCredentials = () => {
+    setCredentialAccount(null);
+    setCredentialsRevealed(false);
+  };
+
+  const copyCredential = async (label: string, value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      toast.info(`${label} 为空`);
+      return;
+    }
+    try {
+      await copyText(trimmed);
+      toast.success(`已复制 ${label}`);
+    } catch (error: any) {
+      toast.error(error?.message || "复制失败");
+    }
   };
 
   const saveRebind = async () => {
@@ -781,6 +886,11 @@ export default function LiteAccounts() {
                     }]}
                     menu={[
                       {
+                        key: "credentials",
+                        label: "查看凭据",
+                        onClick: () => openCredentials(account),
+                      },
+                      {
                         key: "rebind",
                         label: "重新绑定",
                         hidden: !canRebindAccount(account),
@@ -939,6 +1049,11 @@ export default function LiteAccounts() {
                           }]}
                           menu={[
                             {
+                              key: "credentials",
+                              label: "查看凭据",
+                              onClick: () => openCredentials(account),
+                            },
+                            {
                               key: "rebind",
                               label: "重新绑定",
                               hidden: !canRebindAccount(account),
@@ -1037,6 +1152,103 @@ export default function LiteAccounts() {
           </div>
         )}
       </CenteredModal>
+
+      {credentialAccount ? (
+        <CenteredModal
+          open
+          onClose={closeCredentials}
+          title="查看凭据"
+          maxWidth={680}
+          closeOnBackdrop
+          closeOnEscape
+          bodyStyle={{ display: "grid", gap: 14 }}
+          footer={(
+            <>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setCredentialsRevealed((current) => !current)}
+              >
+                {credentialsRevealed ? "隐藏完整凭据" : "显示完整凭据"}
+              </button>
+              <button type="button" className="btn btn-primary" onClick={closeCredentials}>
+                关闭
+              </button>
+            </>
+          )}
+        >
+          <div style={{ display: "grid", gap: 14 }}>
+            <div
+              style={{
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--color-border)",
+                background: "var(--color-bg-card)",
+                padding: 12,
+                display: "grid",
+                gap: 4,
+              }}
+            >
+              <div style={{ fontWeight: 700 }}>{resolveAccountName(credentialAccount)}</div>
+              <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                {credentialAccount.site?.name || "-"}
+              </div>
+            </div>
+            <div style={{ display: "grid", gap: 10 }}>
+              {buildCredentialFields(credentialAccount).map((field) => {
+                const hasValue = field.value.trim().length > 0;
+                const displayValue = !hasValue
+                  ? "-"
+                  : field.sensitive && !credentialsRevealed
+                    ? maskSecret(field.value)
+                    : field.value;
+                return (
+                  <div
+                    key={field.key}
+                    style={{
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "var(--radius-sm)",
+                      padding: 12,
+                      display: "grid",
+                      gap: 8,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 10,
+                        alignItems: "center",
+                      }}
+                    >
+                      <div style={fieldLabelStyle}>{field.label}</div>
+                      <button
+                        type="button"
+                        className="btn btn-link"
+                        onClick={() => void copyCredential(field.label, field.value)}
+                        disabled={!hasValue}
+                      >
+                        复制
+                      </button>
+                    </div>
+                    <div
+                      style={{
+                        ...monoTextStyle,
+                        borderRadius: "var(--radius-sm)",
+                        background: "var(--color-bg)",
+                        border: "1px solid var(--color-border)",
+                        padding: "10px 12px",
+                        minHeight: 38,
+                      }}
+                    >
+                      {displayValue}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </CenteredModal>
+      ) : null}
 
       {rebindAccount ? (
         <CenteredModal
