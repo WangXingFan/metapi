@@ -1,6 +1,6 @@
 {
   "name": "metapi",
-  "version": "1.3.8",
+  "version": "1.3.9",
   "description": "Lite operations console for managing relay sites, accounts, keys, check-ins, and backups",
   "main": "dist/desktop/main.js",
   "keywords": [
