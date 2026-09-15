@@ -6,22 +6,38 @@ describe('docker workflows', () => {
   it('publishes armv7 docker images in the release workflow', () => {
     const ciWorkflow = readFileSync(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
     const releaseWorkflow = readFileSync(resolve(process.cwd(), '.github/workflows/release.yml'), 'utf8');
+    const dockerWorkflow = readFileSync(resolve(process.cwd(), '.github/workflows/docker-image.yml'), 'utf8');
 
     expect(ciWorkflow).not.toContain('publish-docker');
 
-    expect(releaseWorkflow).toContain('arch: armv7');
-    expect(releaseWorkflow).toContain('platform: linux/arm/v7');
-    expect(releaseWorkflow).toContain('"${tag}-armv7"');
+    expect(releaseWorkflow).toContain('uses: ./.github/workflows/docker-image.yml');
+    expect(releaseWorkflow).toContain('secrets: inherit');
+    expect(dockerWorkflow).toContain('arch: armv7');
+    expect(dockerWorkflow).toContain('platform: linux/arm/v7');
+    expect(dockerWorkflow).toContain('"${tag}-armv7"');
   });
 
   it('publishes to GHCR and treats Docker Hub as optional', () => {
-    const releaseWorkflow = readFileSync(resolve(process.cwd(), '.github/workflows/release.yml'), 'utf8');
+    const releaseWorkflow = readFileSync(resolve(process.cwd(), '.github/workflows/docker-image.yml'), 'utf8');
 
     expect(releaseWorkflow).toContain('ghcr.io/${{ github.repository }}');
     expect(releaseWorkflow).toContain('Docker Hub secrets missing; publishing GHCR only.');
     expect(releaseWorkflow).toContain("if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''");
     expect(releaseWorkflow).not.toContain('1467078763/metapi');
     expect(releaseWorkflow).not.toContain('Missing Docker Hub secrets: DOCKERHUB_USERNAME / DOCKERHUB_TOKEN');
+  });
+
+  it('can publish a server image independently and traces the source revision', () => {
+    const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/docker-image.yml'), 'utf8');
+    expect(workflow).toContain('workflow_dispatch:');
+    expect(workflow).toContain('workflow_call:');
+    expect(workflow).not.toContain('needs: build-packages');
+    expect(workflow).toContain('needs: publish-docker-arch');
+    expect(workflow).toContain("github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')");
+    expect(workflow).toContain('type=sha,format=long');
+    expect(workflow).toContain('type=raw,value=latest');
+    expect(workflow).toContain('group: metapi-docker-publish');
+    expect(workflow).toContain('packages: write');
   });
 
   it('uses an armv7-capable node base image in the Dockerfile', () => {
