@@ -17,6 +17,8 @@ export const PLATFORM_ALIASES = Object.assign(Object.create(null), {
   'done-hub': 'done-hub',
   veloera: 'veloera',
   sub2api: 'sub2api',
+  flowrealm: 'flowrealm',
+  'flowrealm-go': 'flowrealm',
   openai: 'openai',
   codex: 'codex',
   'chatgpt-codex': 'codex',
@@ -73,6 +75,7 @@ export function detectPlatformByUrlHint(url) {
   const path = parsed?.pathname?.trim().toLowerCase() || '';
 
   if (host === 'api.openai.com') return 'openai';
+  if (host === 'images.aihappy.indevs.in') return 'flowrealm';
   if (host === 'chatgpt.com' && path.startsWith('/backend-api/codex')) return 'codex';
   if (host === 'api.anthropic.com' || (host === 'anthropic.com' && path.startsWith('/v1'))) return 'claude';
   if (

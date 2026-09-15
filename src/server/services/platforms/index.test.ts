@@ -38,6 +38,24 @@ async function withHttpServer(
 }
 
 describe('getAdapter platform aliases', () => {
+  it('registers FlowRealm for the known image site and platform alias', async () => {
+    expect(getAdapter('flowrealm-go')?.platformName).toBe('flowrealm');
+    expect((await detectPlatform('https://images.aihappy.indevs.in'))?.platformName).toBe('flowrealm');
+  });
+
+  it('detects FlowRealm on a custom domain from public metadata', async () => {
+    await withHttpServer((req, res) => {
+      if (req.url === '/public/display') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ project_name: '流光绘境' }));
+        return;
+      }
+      res.writeHead(404).end();
+    }, async (baseUrl) => {
+      expect((await detectPlatform(baseUrl))?.platformName).toBe('flowrealm');
+    });
+  });
+
   it('returns dedicated anyrouter adapter for anyrouter alias', () => {
     const adapter = getAdapter('anyrouter');
     expect(adapter?.platformName).toBe('anyrouter');

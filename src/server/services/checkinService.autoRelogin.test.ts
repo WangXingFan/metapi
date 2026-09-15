@@ -91,29 +91,32 @@ describe('checkinService auto relogin', () => {
     updateSetMock.mockReset();
   });
 
-  it('retries checkin once after auto relogin when access token is missing', async () => {
+  it.each([
+    { platform: 'new-api', username: 'linuxdo_7659', userId: 7659, message: '无权进行此操作，未登录且未提供 access token' },
+    { platform: 'flowrealm', username: 'user@example.com', userId: undefined, message: 'HTTP 401: 未登录或登录已过期' },
+  ])('retries $platform checkin and refreshes balance after automatic relogin', async ({ platform, username, userId, message }) => {
     selectAllMock.mockReturnValue([
       {
         accounts: {
           id: 1,
-          username: 'linuxdo_7659',
+          username,
           accessToken: 'expired-token',
           status: 'active',
           extraConfig: JSON.stringify({
-            autoRelogin: { username: 'linuxdo_7659', passwordCipher: 'cipher' },
+            autoRelogin: { username, passwordCipher: 'cipher' },
           }),
         },
         sites: {
           id: 3,
           name: 'kfc',
           url: 'https://kfc-api.sxxe.net',
-          platform: 'new-api',
+          platform,
         },
       },
     ]);
 
     adapterMock.checkin
-      .mockResolvedValueOnce({ success: false, message: '无权进行此操作，未登录且未提供 access token' })
+      .mockResolvedValueOnce({ success: false, message })
       .mockResolvedValueOnce({ success: true, message: 'checked in' });
     decryptPasswordMock.mockReturnValue('plain-password');
     adapterMock.login.mockResolvedValue({ success: true, accessToken: 'fresh-token' });
@@ -126,7 +129,9 @@ describe('checkinService auto relogin', () => {
     expect(adapterMock.checkin).toHaveBeenCalledTimes(2);
     expect(adapterMock.checkin.mock.calls[0][1]).toBe('expired-token');
     expect(adapterMock.checkin.mock.calls[1][1]).toBe('fresh-token');
-    expect(adapterMock.checkin.mock.calls[0][2]).toBe(7659);
+    expect(adapterMock.checkin.mock.calls[0][2]).toBe(userId);
+    expect(adapterMock.login).toHaveBeenCalledWith('https://kfc-api.sxxe.net', username, 'plain-password');
+    expect(refreshBalanceMock).toHaveBeenCalledWith(1);
     expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({ accessToken: 'fresh-token' }));
   });
 

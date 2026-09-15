@@ -6,6 +6,7 @@ import { VeloeraAdapter } from './veloera.js';
 import { OneHubAdapter } from './oneHub.js';
 import { DoneHubAdapter } from './doneHub.js';
 import { Sub2ApiAdapter } from './sub2api.js';
+import { FlowRealmAdapter } from './flowRealm.js';
 import { OpenAiAdapter } from './openai.js';
 import { CodexAdapter } from './codex.js';
 import { ClaudeAdapter } from './claude.js';
@@ -25,6 +26,7 @@ const adapters: PlatformAdapter[] = [
   new GeminiCliAdapter(),
   new AntigravityAdapter(),
   new CliProxyApiAdapter(),
+  new FlowRealmAdapter(),
   new AnyRouterAdapter(),
   new DoneHubAdapter(),
   new OneHubAdapter(),
