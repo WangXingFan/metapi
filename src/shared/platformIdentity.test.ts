@@ -11,12 +11,15 @@ describe('platformIdentity', () => {
     expect(normalizePlatformAlias('anti-gravity')).toBe('antigravity');
     expect(normalizePlatformAlias('one api')).toBe('one-api');
     expect(normalizePlatformAlias('FlowRealm-Go')).toBe('flowrealm');
+    expect(normalizePlatformAlias('EMRank')).toBe('emrank');
     expect(normalizePlatformAlias('')).toBe('');
   });
 
   it('detects platform by well-known url hints', () => {
     expect(detectPlatformByUrlHint('https://api.openai.com/v1/models')).toBe('openai');
     expect(detectPlatformByUrlHint('https://images.aihappy.indevs.in/#/studio')).toBe('flowrealm');
+    expect(detectPlatformByUrlHint('https://emrank.tech')).toBe('emrank');
+    expect(detectPlatformByUrlHint('https://docs.emrank.tech')).toBeUndefined();
     expect(detectPlatformByUrlHint('https://images.aihappy.indevs.in.evil.example')).toBeUndefined();
     expect(detectPlatformByUrlHint('https://evil.example/?next=https://images.aihappy.indevs.in')).toBeUndefined();
     expect(detectPlatformByUrlHint('https://chatgpt.com/backend-api/codex')).toBe('codex');

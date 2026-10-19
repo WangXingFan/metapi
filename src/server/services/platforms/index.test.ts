@@ -56,6 +56,11 @@ describe('getAdapter platform aliases', () => {
     });
   });
 
+  it('registers EMrank for its platform alias and known URL', async () => {
+    expect(getAdapter('emrank')?.platformName).toBe('emrank');
+    expect((await detectPlatform('https://emrank.tech'))?.platformName).toBe('emrank');
+  });
+
   it('returns dedicated anyrouter adapter for anyrouter alias', () => {
     const adapter = getAdapter('anyrouter');
     expect(adapter?.platformName).toBe('anyrouter');

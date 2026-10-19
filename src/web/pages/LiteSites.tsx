@@ -48,6 +48,7 @@ const PLATFORM_OPTIONS = [
   { value: "done-hub", label: "done-hub" },
   { value: "sub2api", label: "sub2api" },
   { value: "flowrealm", label: "流光绘境（FlowRealm）" },
+  { value: "emrank", label: "EMRank" },
   { value: "openai", label: "openai" },
   { value: "claude", label: "claude" },
   { value: "gemini", label: "gemini" },

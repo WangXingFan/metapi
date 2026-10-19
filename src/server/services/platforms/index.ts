@@ -7,6 +7,7 @@ import { OneHubAdapter } from './oneHub.js';
 import { DoneHubAdapter } from './doneHub.js';
 import { Sub2ApiAdapter } from './sub2api.js';
 import { FlowRealmAdapter } from './flowRealm.js';
+import { EmrankAdapter } from './emrank.js';
 import { OpenAiAdapter } from './openai.js';
 import { CodexAdapter } from './codex.js';
 import { ClaudeAdapter } from './claude.js';
@@ -27,6 +28,7 @@ const adapters: PlatformAdapter[] = [
   new AntigravityAdapter(),
   new CliProxyApiAdapter(),
   new FlowRealmAdapter(),
+  new EmrankAdapter(),
   new AnyRouterAdapter(),
   new DoneHubAdapter(),
   new OneHubAdapter(),
