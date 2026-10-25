@@ -9,7 +9,7 @@ import { mergeAccountExtraConfig } from '../../services/accountExtraConfig.js';
 const getApiTokensMock = vi.fn();
 const getApiTokenMock = vi.fn();
 const createApiTokenMock = vi.fn();
-const getUserGroupsMock = vi.fn();
+const getUserGroupOptionsMock = vi.fn();
 const deleteApiTokenMock = vi.fn();
 const updateApiTokenMock = vi.fn();
 const apiTokenCapabilities = { create: true, update: true, delete: true };
@@ -22,7 +22,7 @@ vi.mock('../../services/platforms/index.js', () => ({
     getApiTokens: (...args: unknown[]) => getApiTokensMock(...args),
     getApiToken: (...args: unknown[]) => getApiTokenMock(...args),
     createApiToken: (...args: unknown[]) => createApiTokenMock(...args),
-    getUserGroups: (...args: unknown[]) => getUserGroupsMock(...args),
+    getUserGroupOptions: (...args: unknown[]) => getUserGroupOptionsMock(...args),
     deleteApiToken: (...args: unknown[]) => deleteApiTokenMock(...args),
     updateApiToken: (...args: unknown[]) => updateApiTokenMock(...args),
   }),
@@ -92,7 +92,7 @@ describe('account tokens sync routes with site status', () => {
     getApiTokensMock.mockReset();
     getApiTokenMock.mockReset();
     createApiTokenMock.mockReset();
-    getUserGroupsMock.mockReset();
+    getUserGroupOptionsMock.mockReset();
     deleteApiTokenMock.mockReset();
     updateApiTokenMock.mockReset();
     apiTokenCapabilities.update = true;
@@ -922,7 +922,8 @@ describe('account tokens sync routes with site status', () => {
 
   it('fetches account token groups from upstream', async () => {
     const { account } = await seedAccount({ siteStatus: 'active' });
-    getUserGroupsMock.mockResolvedValue(['default', 'vip']);
+    const groupDetails = [{ name: 'default', ratio: 0 }, { name: 'vip', ratio: 'auto', description: '自动选择专业线路' }];
+    getUserGroupOptionsMock.mockResolvedValue(groupDetails);
 
     const response = await app.inject({
       method: 'GET',
@@ -933,8 +934,9 @@ describe('account tokens sync routes with site status', () => {
     expect(response.json()).toMatchObject({
       success: true,
       groups: ['default', 'vip'],
+      groupDetails,
     });
-    expect(getUserGroupsMock).toHaveBeenCalledTimes(1);
+    expect(getUserGroupOptionsMock).toHaveBeenCalledTimes(1);
   });
 
   it('deletes upstream token before removing local token', async () => {

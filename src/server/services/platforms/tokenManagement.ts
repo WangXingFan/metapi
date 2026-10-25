@@ -1,27 +1,52 @@
 import type { ApiTokenInfo } from './base.js';
+import type { AccountTokenGroup } from '../../../shared/accountTokenGroupTypes.js';
 
 const GROUP_ENVELOPE_KEYS = new Set(['success', 'message', 'code', 'data', 'error', 'status', 'total', 'page', 'page_size']);
 
-export function parseTokenGroupNames(payload: unknown): string[] {
+export function parseTokenGroupMetadata(payload: unknown): Pick<AccountTokenGroup, 'ratio' | 'description'> {
+  const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : null;
+  const rawRatio = record ? record.ratio ?? record.group_ratio ?? record.groupRatio ?? record.rate_multiplier : payload;
+  const result: Pick<AccountTokenGroup, 'ratio' | 'description'> = {};
+  if (rawRatio === 'auto') {
+    result.ratio = 'auto';
+  } else if (typeof rawRatio === 'number' || (typeof rawRatio === 'string' && rawRatio.trim())) {
+    const ratio = Number(rawRatio);
+    if (Number.isFinite(ratio) && ratio >= 0) result.ratio = ratio;
+  }
+  const description = record?.desc ?? record?.description;
+  if (typeof description === 'string' && description.trim()) result.description = description.trim();
+  return result;
+}
+
+function mergeTokenGroups(groups: AccountTokenGroup[]): AccountTokenGroup[] {
+  const unique = new Map<string, AccountTokenGroup>();
+  for (const group of groups) unique.set(group.name, { ...unique.get(group.name), ...group });
+  return [...unique.values()];
+}
+
+export function parseTokenGroups(payload: unknown): AccountTokenGroup[] {
   if (!payload || typeof payload !== 'object') return [];
   if (Array.isArray(payload)) {
-    return Array.from(new Set(payload.flatMap((item) => {
-      if (typeof item === 'string') return item.trim() ? [item.trim()] : [];
+    const groups = payload.flatMap((item): AccountTokenGroup[] => {
+      if (typeof item === 'string') return item.trim() ? [{ name: item.trim() }] : [];
       if (!item || typeof item !== 'object') return [];
       const record = item as Record<string, unknown>;
       const name = [record.name, record.group, record.group_name, record.groupName, record.value, record.key]
         .find((value) => typeof value === 'string' && value.trim());
-      return typeof name === 'string' ? [name.trim()] : [];
-    })));
+      return typeof name === 'string' ? [{ name: name.trim(), ...parseTokenGroupMetadata(record) }] : [];
+    });
+    return mergeTokenGroups(groups);
   }
   const record = payload as Record<string, unknown>;
   if (record.success === false || record.error) return [];
   if (typeof record.code === 'number' && record.code !== 0 && record.code !== 200) return [];
-  if (record.data !== undefined) return parseTokenGroupNames(record.data);
+  if (record.data !== undefined) return parseTokenGroups(record.data);
   for (const collection of ['groups', 'items', 'list']) {
-    if (record[collection] && typeof record[collection] === 'object') return parseTokenGroupNames(record[collection]);
+    if (record[collection] && typeof record[collection] === 'object') return parseTokenGroups(record[collection]);
   }
-  return Object.keys(record).map((key) => key.trim()).filter((key) => key && !GROUP_ENVELOPE_KEYS.has(key.toLowerCase()));
+  return mergeTokenGroups(Object.entries(record)
+    .filter(([key]) => key.trim() && !GROUP_ENVELOPE_KEYS.has(key.trim().toLowerCase()))
+    .map(([key, value]) => ({ name: key.trim(), ...parseTokenGroupMetadata(value) })));
 }
 
 export function resolveTokenGroupErrorMessage(payload: unknown): string {

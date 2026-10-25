@@ -1,4 +1,5 @@
 import { clearAuthSession, getAuthToken } from "./authSession.js";
+import type { AccountTokenGroup } from "../shared/accountTokenGroupTypes.js";
 
 type BufferLike = {
   from(data: ArrayBuffer): { toString(encoding: "base64"): string };
@@ -892,7 +893,12 @@ export const api = {
       body: JSON.stringify(data),
     }),
   getAccountTokenGroups: (accountId: number) =>
-    request(`/api/account-tokens/groups/${accountId}`),
+    request<{
+      success: boolean;
+      groups: string[];
+      groupDetails?: AccountTokenGroup[];
+      capabilities: { create: boolean; update: boolean; delete: boolean };
+    }>(`/api/account-tokens/groups/${accountId}`),
   setDefaultAccountToken: (id: number) =>
     request(`/api/account-tokens/${id}/default`, { method: "POST" }),
   getAccountTokenValue: (id: number) =>

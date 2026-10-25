@@ -1,5 +1,6 @@
 import { ApiTokenInfo, BasePlatformAdapter, CheckinResult, BalanceInfo, CreateApiTokenOptions, type UpdateApiTokenOptions } from './base.js';
-import { findUpstreamToken, parseTokenGroupNames, resolveTokenGroupErrorMessage } from './tokenManagement.js';
+import { findUpstreamToken, parseTokenGroups, resolveTokenGroupErrorMessage } from './tokenManagement.js';
+import type { AccountTokenGroup } from '../../../shared/accountTokenGroupTypes.js';
 
 type CreateApiTokenPayload = {
   name: string;
@@ -129,14 +130,14 @@ export class OneApiAdapter extends BasePlatformAdapter {
     return tokens.find((token) => token.enabled !== false)?.key || tokens[0]?.key || null;
   }
 
-  async getUserGroups(baseUrl: string, accessToken: string): Promise<string[]> {
+  override async getUserGroupOptions(baseUrl: string, accessToken: string): Promise<AccountTokenGroup[]> {
     const headers = { Authorization: `Bearer ${accessToken}` };
     let terminalError: string | null = null;
-    for (const endpoint of ['/api/user_group_map', '/api/user/self/groups', '/api/user/groups']) {
+    for (const endpoint of ['/api/user/groups', '/api/user/self/groups', '/api/user_group_map']) {
       try {
         const response = await this.fetchJson<any>(`${baseUrl}${endpoint}`, { headers });
         if (response?.success === false || response?.error) terminalError ||= resolveTokenGroupErrorMessage(response);
-        const groups = parseTokenGroupNames(response);
+        const groups = parseTokenGroups(response);
         if (groups.length > 0) return groups;
       } catch (error) {
         if (!(error instanceof Error) || !/HTTP 404\b/.test(error.message)) {

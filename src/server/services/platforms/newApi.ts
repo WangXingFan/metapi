@@ -4,7 +4,8 @@ import { createContext, runInContext } from 'node:vm';
 import { withSiteProxyRequestInit } from '../siteProxy.js';
 import { fetchJsonWithShieldCookieRetry } from './newApiShield.js';
 import type { UpdateApiTokenOptions } from './base.js';
-import { findUpstreamToken, parseTokenGroupNames, resolveTokenGroupErrorMessage } from './tokenManagement.js';
+import { findUpstreamToken, parseTokenGroups, resolveTokenGroupErrorMessage } from './tokenManagement.js';
+import type { AccountTokenGroup } from '../../../shared/accountTokenGroupTypes.js';
 
 export class NewApiAdapter extends BasePlatformAdapter {
   readonly platformName: string = 'new-api';
@@ -1312,18 +1313,19 @@ export class NewApiAdapter extends BasePlatformAdapter {
     return false;
   }
 
-  async getUserGroups(baseUrl: string, accessToken: string, platformUserId?: number): Promise<string[]> {
+  override async getUserGroupOptions(baseUrl: string, accessToken: string, platformUserId?: number): Promise<AccountTokenGroup[]> {
     const resolvedUserId = platformUserId || await this.discoverUserId(baseUrl, accessToken);
-    const endpoints = ['/api/user/self/groups', '/api/user_group_map', '/api/user/groups'];
+    // Prefer the user-specific ratios and descriptions over legacy name-only maps.
+    const endpoints = ['/api/user/groups', '/api/user/self/groups', '/api/user_group_map'];
     let terminalError: string | null = null;
-    const fetchGroups = async (request: (path: string) => Promise<any>): Promise<string[]> => {
+    const fetchGroups = async (request: (path: string) => Promise<any>): Promise<AccountTokenGroup[]> => {
       for (const path of endpoints) {
         try {
           const response = await request(path);
           if (response?.success === false || response?.error) {
             terminalError ||= resolveTokenGroupErrorMessage(response);
           }
-          const groups = parseTokenGroupNames(response);
+          const groups = parseTokenGroups(response);
           if (groups.length > 0) return groups;
         } catch (error) {
           // Keep authentication failures visible instead of inventing a default group.

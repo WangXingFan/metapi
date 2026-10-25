@@ -3,6 +3,11 @@ import { api } from '../../api.js';
 import CenteredModal from '../../components/CenteredModal.js';
 import { useToast } from '../../components/Toast.js';
 import { fieldLabelStyle, inputStyle, monoTextStyle } from './shared.js';
+import type { AccountTokenGroup } from '../../../shared/accountTokenGroupTypes.js';
+
+function formatGroupRatio(ratio: AccountTokenGroup['ratio']): string {
+  return ratio === 'auto' ? '自动' : ratio === undefined ? '上游未提供' : `${ratio}×`;
+}
 
 type Token = {
   id: number;
@@ -28,7 +33,7 @@ export default function AccountTokenDialog({ mode, token, accounts, initialAccou
   const [name, setName] = useState(token?.name || '');
   const [group, setGroup] = useState(token?.tokenGroup || '');
   const [tokenValue, setTokenValue] = useState('');
-  const [groups, setGroups] = useState<string[]>([]);
+  const [groupDetails, setGroupDetails] = useState<AccountTokenGroup[]>([]);
   const [capabilities, setCapabilities] = useState({ create: false, update: false });
   const [loadingGroups, setLoadingGroups] = useState(mode !== 'complete');
   const [groupError, setGroupError] = useState('');
@@ -41,14 +46,14 @@ export default function AccountTokenDialog({ mode, token, accounts, initialAccou
     let active = true;
     setLoadingGroups(true);
     setGroupError('');
-    setGroups([]);
+    setGroupDetails([]);
     setCapabilities({ create: false, update: false });
     void api.getAccountTokenGroups(accountId).then((result) => {
       if (!active) return;
       const available: string[] = Array.isArray(result?.groups)
         ? result.groups.filter((value: unknown): value is string => typeof value === 'string' && !!value.trim())
         : [];
-      setGroups(available);
+      setGroupDetails(available.map((name) => result.groupDetails?.find((item) => item.name === name) || { name }));
       setCapabilities(result?.capabilities || { create: false, update: false });
       if (mode === 'create') setGroup((current) => available.includes(current)
         ? current : available.includes('default') ? 'default' : available[0] || '');
@@ -60,6 +65,8 @@ export default function AccountTokenDialog({ mode, token, accounts, initialAccou
     return () => { active = false; };
   }, [accountId, completing, mode, reload]);
 
+  const groups = groupDetails.map((item) => item.name);
+  const selectedGroup = groupDetails.find((item) => item.name === group);
   const canManage = completing || (mode === 'create' ? capabilities.create : capabilities.update);
   const save = async () => {
     if (saving || (!completing && (loadingGroups || !canManage))) return;
@@ -135,10 +142,27 @@ export default function AccountTokenDialog({ mode, token, accounts, initialAccou
               </div>
               <select id="account-key-group" aria-label="分组" value={group} onChange={(event) => setGroup(event.target.value)} style={inputStyle} disabled={saving || loadingGroups}>
                 <option value="" disabled>{loadingGroups ? '正在加载上游分组...' : '请选择上游分组'}</option>
-                {Array.from(new Set([...groups, token?.tokenGroup || ''])).filter(Boolean).map((item) => (
-                  <option key={item} value={item}>{item}{!groups.includes(item) ? '（当前分组，上游未返回）' : ''}</option>
-                ))}
+                {Array.from(new Set([...groups, token?.tokenGroup || ''])).filter(Boolean).map((item) => {
+                  const detail = groupDetails.find((entry) => entry.name === item);
+                  return (
+                    <option key={item} value={item}>
+                      {detail?.label || item}{detail?.ratio !== undefined ? ` · ${formatGroupRatio(detail.ratio)}` : ''}
+                      {!groups.includes(item) ? '（当前分组，上游未返回）' : ''}
+                    </option>
+                  );
+                })}
               </select>
+              {group && !loadingGroups && !groupError ? (
+                <div role="group" aria-label="分组详情" aria-live="polite" style={{ marginTop: 8, padding: '10px 12px', borderRadius: 'var(--radius-sm)', background: 'var(--color-bg)', border: '1px solid var(--color-border)', fontSize: 12, lineHeight: 1.7 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                    <span style={{ color: 'var(--color-text-muted)' }}>分组倍率</span>
+                    <strong style={{ color: 'var(--color-text-primary)' }}>{formatGroupRatio(selectedGroup?.ratio)}</strong>
+                  </div>
+                  <div style={{ marginTop: 4, color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                    <span style={{ color: 'var(--color-text-muted)' }}>简介：</span>{selectedGroup?.description || '上游未提供简介'}
+                  </div>
+                </div>
+              ) : null}
               {!loadingGroups && !groupError && groups.length === 0 ? (
                 <div className="alert alert-warning" style={{ marginTop: 8 }}>上游未返回可用分组，请刷新或检查账户会话。</div>
               ) : null}

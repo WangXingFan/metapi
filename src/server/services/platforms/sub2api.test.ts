@@ -583,8 +583,8 @@ describe('Sub2ApiAdapter', () => {
           code: 0,
           message: 'success',
           data: [
-            { id: 5, name: 'basic' },
-            { id: 6, name: 'pro' },
+            { id: 5, name: 'basic', rate_multiplier: 0, description: '免费分组' },
+            { id: 6, name: 'pro', rate_multiplier: 0.8, description: '专业分组' },
           ],
         }));
         return;
@@ -594,6 +594,10 @@ describe('Sub2ApiAdapter', () => {
 
     const groups = await adapter.getUserGroups(baseUrl, 'jwt-token');
     expect(groups).toEqual(['5', '6']);
+    expect(await adapter.getUserGroupOptions(baseUrl, 'jwt-token')).toEqual([
+      { name: '5', label: 'basic', ratio: 0, description: '免费分组' },
+      { name: '6', label: 'pro', ratio: 0.8, description: '专业分组' },
+    ]);
   });
 
   it('falls back to infer groups from /api/v1/keys when group endpoint is unavailable', async () => {

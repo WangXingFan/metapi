@@ -911,12 +911,11 @@ export async function accountTokensRoutes(app: FastifyInstance) {
 
     try {
       const platformUserId = resolvePlatformUserId(account.extraConfig, account.username);
-      const groups = await withAccountProxyOverride(
+      const groupDetails = await withAccountProxyOverride(
         getProxyUrlFromExtraConfig(account.extraConfig),
-        () => adapter.getUserGroups(site.url, account.accessToken, platformUserId),
+        () => adapter.getUserGroupOptions(site.url, account.accessToken, platformUserId),
       );
-      const normalized = Array.from(new Set((groups || []).map((item) => String(item || '').trim()).filter(Boolean)));
-      return { success: true, groups: normalized, capabilities: adapter.apiTokenCapabilities };
+      return { success: true, groups: groupDetails.map((group) => group.name), groupDetails, capabilities: adapter.apiTokenCapabilities };
     } catch (error: any) {
       return reply.code(502).send({
         success: false,

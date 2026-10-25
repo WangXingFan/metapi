@@ -1,5 +1,6 @@
 import { OneApiAdapter } from './oneApi.js';
-import { parseTokenGroupNames } from './tokenManagement.js';
+import { parseTokenGroups } from './tokenManagement.js';
+import type { AccountTokenGroup } from '../../../shared/accountTokenGroupTypes.js';
 
 export class OneHubAdapter extends OneApiAdapter {
   readonly platformName: string = 'one-hub';
@@ -39,15 +40,15 @@ export class OneHubAdapter extends OneApiAdapter {
   /**
    * OneHub user groups: /api/user_group_map returns { data: { group_name: ratio, ... } }
    */
-  override async getUserGroups(baseUrl: string, accessToken: string): Promise<string[]> {
+  override async getUserGroupOptions(baseUrl: string, accessToken: string): Promise<AccountTokenGroup[]> {
     try {
       const res = await this.fetchJson<any>(`${baseUrl}/api/user_group_map`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-      const groups = parseTokenGroupNames(res);
+      const groups = parseTokenGroups(res);
       if (groups.length > 0) return groups;
     } catch {}
 
-    return super.getUserGroups(baseUrl, accessToken);
+    return super.getUserGroupOptions(baseUrl, accessToken);
   }
 }

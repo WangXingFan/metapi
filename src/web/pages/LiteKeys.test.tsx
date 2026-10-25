@@ -3,6 +3,7 @@ import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'rea
 import { MemoryRouter } from 'react-router-dom';
 import { ToastProvider } from '../components/Toast.js';
 import LiteKeys from './LiteKeys.js';
+import type { AccountTokenGroup } from '../../shared/accountTokenGroupTypes.js';
 
 const { apiMock, viewport } = vi.hoisted(() => ({
   viewport: { mobile: false },
@@ -44,7 +45,11 @@ describe('LiteKeys', () => {
     apiMock.getAccountsSnapshot.mockResolvedValue({ accounts: [], sites: [] });
     apiMock.getAccountTokens.mockResolvedValue([]);
     apiMock.syncAccountTokens.mockResolvedValue({ success: true });
-    apiMock.getAccountTokenGroups.mockResolvedValue({ groups: ['cckcc', 'cckpro'], capabilities: { create: true, update: true, delete: true } });
+    apiMock.getAccountTokenGroups.mockResolvedValue({
+      groups: ['cckcc', 'cckpro'],
+      groupDetails: [{ name: 'cckcc', ratio: 1, description: '标准线路' }, { name: 'cckpro', ratio: 0.5, description: '专业线路\n支持更多模型' }],
+      capabilities: { create: true, update: true, delete: true },
+    });
     apiMock.addAccountToken.mockResolvedValue({ success: true, maskedPending: 0 });
     apiMock.updateAccountToken.mockResolvedValue({ success: true });
     apiMock.deleteAccountToken.mockResolvedValue({ success: true });
@@ -58,6 +63,7 @@ describe('LiteKeys', () => {
     const button = (label: string) => root.root.find((node) => node.type === 'button' && collectText(node).trim() === label);
     const input = (label: string) => root.root.find((node) => node.type === 'input' && node.props['aria-label'] === label);
     const groupSelect = () => root.root.find((node) => node.type === 'select' && node.props['aria-label'] === '分组');
+    const groupDetails = () => root.root.find((node) => node.type === 'div' && node.props['aria-label'] === '分组详情');
     try {
       await act(async () => {
         root = create(<MemoryRouter initialEntries={['/keys?accountId=101']}><ToastProvider><LiteKeys /></ToastProvider></MemoryRouter>);
@@ -67,10 +73,15 @@ describe('LiteKeys', () => {
       await flushMicrotasks();
       expect(apiMock.getAccountTokenGroups).toHaveBeenCalledWith(101);
       expect(groupSelect().findAllByType('option').map((option) => option.props.value)).toEqual(['', 'cckcc', 'cckpro']);
+      expect(groupSelect().findAllByType('option').map(collectText)).toContain('cckpro · 0.5×');
+      expect(collectText(groupDetails())).toContain('1×');
+      expect(collectText(groupDetails())).toContain('标准线路');
       await act(async () => {
         input('Key 名称').props.onChange({ target: { value: 'new-key' } });
         groupSelect().props.onChange({ target: { value: 'cckpro' } });
       });
+      expect(collectText(groupDetails())).toContain('0.5×');
+      expect(collectText(groupDetails())).toContain('专业线路\n支持更多模型');
       await act(async () => { button('在上游创建').props.onClick(); });
       await flushMicrotasks();
       expect(apiMock.addAccountToken).toHaveBeenCalledWith({ accountId: 101, name: 'new-key', group: 'cckpro' });
@@ -80,10 +91,16 @@ describe('LiteKeys', () => {
       await flushMicrotasks();
       expect(groupSelect().props.value).toBe('cckcc');
       expect(groupSelect().findAllByType('option').map((option) => option.props.value)).toEqual(['', 'cckcc', 'cckpro']);
-      apiMock.getAccountTokenGroups.mockResolvedValueOnce({ groups: ['cckcc', 'cckpro', 'new-upstream-group'], capabilities: { create: true, update: true } });
+      apiMock.getAccountTokenGroups.mockResolvedValueOnce({
+        groups: ['cckcc', 'cckpro', 'new-upstream-group'],
+        groupDetails: [{ name: 'cckcc', ratio: 0.25, description: '上游已更新' }],
+        capabilities: { create: true, update: true },
+      });
       await act(async () => { button('刷新分组').props.onClick(); });
       await flushMicrotasks();
       expect(groupSelect().props.value).toBe('cckcc');
+      expect(collectText(groupDetails())).toContain('0.25×');
+      expect(collectText(groupDetails())).toContain('上游已更新');
       expect(groupSelect().findAllByType('option').map((option) => option.props.value)).toContain('new-upstream-group');
       await act(async () => { groupSelect().props.onChange({ target: { value: 'cckpro' } }); });
       await act(async () => { button('保存并同步上游').props.onClick(); });
@@ -96,6 +113,29 @@ describe('LiteKeys', () => {
     } finally {
       root?.unmount();
     }
+  });
+
+  it.each<{ details?: AccountTokenGroup[]; ratio: string; option: string }>([
+    { details: [{ name: '5', label: '免费组', ratio: 0 }], ratio: '0×', option: '免费组 · 0×' },
+    { details: [{ name: '5', ratio: 'auto', description: '自动选择' }], ratio: '自动', option: '5 · 自动' },
+    { details: [{ name: '5', description: '只有简介' }], ratio: '上游未提供', option: '5' },
+    { details: undefined, ratio: '上游未提供', option: '5' },
+  ])('renders group metadata honestly and keeps the upstream value ($option)', async ({ details, ratio, option }) => {
+    apiMock.getAccountsSnapshot.mockResolvedValue({ sites: [], accounts: [{ id: 101, username: 'Account', credentialMode: 'session', site: { id: 1, name: 'Site' } }] });
+    apiMock.getAccountTokenGroups.mockResolvedValue({ groups: ['5'], groupDetails: details, capabilities: { create: true, update: false } });
+    let root!: ReactTestRenderer;
+    try {
+      await act(async () => { root = create(<MemoryRouter><ToastProvider><LiteKeys /></ToastProvider></MemoryRouter>); });
+      await flushMicrotasks();
+      await act(async () => { root.root.find((node) => node.type === 'button' && collectText(node) === '新建 Key').props.onClick(); });
+      await flushMicrotasks();
+      const select = root.root.find((node) => node.type === 'select' && node.props['aria-label'] === '分组');
+      expect(select.props.value).toBe('5');
+      expect(select.findAllByType('option').map(collectText)).toContain(option);
+      const info = collectText(root.root.find((node) => node.type === 'div' && node.props['aria-label'] === '分组详情'));
+      expect(info).toContain(`分组倍率${ratio}`);
+      expect(info).toContain(details?.[0]?.description || '上游未提供简介');
+    } finally { root?.unmount(); }
   });
 
   it('allows syncing a selected session account that has no saved keys', async () => {
