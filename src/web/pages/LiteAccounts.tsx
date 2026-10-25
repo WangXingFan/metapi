@@ -33,6 +33,7 @@ type AccountItem = {
   id: number;
   username?: string | null;
   accessToken?: string | null;
+  platformUserId?: number | null;
   status?: string | null;
   credentialMode?: "session" | "apikey" | string;
   checkinEnabled?: boolean;
@@ -184,7 +185,7 @@ function normalizePositiveId(value: unknown): string {
 }
 
 function resolvePlatformUserId(account: AccountItem): string {
-  return normalizePositiveId(parseExtraConfig(account.extraConfig).platformUserId);
+  return normalizePositiveId(account.platformUserId) || normalizePositiveId(parseExtraConfig(account.extraConfig).platformUserId);
 }
 
 type CredentialField = {
@@ -336,6 +337,24 @@ export default function LiteAccounts() {
   const [rebinding, setRebinding] = useState(false);
   const [credentialAccount, setCredentialAccount] = useState<AccountItem | null>(null);
   const [credentialsRevealed, setCredentialsRevealed] = useState(false);
+  const [credentialsLoading, setCredentialsLoading] = useState(false);
+  const [credentialsError, setCredentialsError] = useState("");
+  const credentialAccountId = credentialAccount?.id;
+
+  useEffect(() => {
+    if (!credentialAccountId) return;
+    let active = true;
+    setCredentialsLoading(true);
+    setCredentialsError("");
+    void api.getAccountCredentials(credentialAccountId).then((credentials) => {
+      if (active) setCredentialAccount((current) => current?.id === credentialAccountId ? { ...current, ...credentials } : current);
+    }).catch((error: any) => {
+      if (active) setCredentialsError(error?.message || "读取账户凭据失败");
+    }).finally(() => {
+      if (active) setCredentialsLoading(false);
+    });
+    return () => { active = false; };
+  }, [credentialAccountId]);
 
   const requestedSiteId = useMemo(
     () => parsePositiveInt(new URLSearchParams(location.search).get("siteId")),
@@ -1168,6 +1187,7 @@ export default function LiteAccounts() {
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => setCredentialsRevealed((current) => !current)}
+                disabled={credentialsLoading || !!credentialsError}
               >
                 {credentialsRevealed ? "隐藏完整凭据" : "显示完整凭据"}
               </button>
@@ -1194,7 +1214,9 @@ export default function LiteAccounts() {
               </div>
             </div>
             <div style={{ display: "grid", gap: 10 }}>
-              {buildCredentialFields(credentialAccount).map((field) => {
+              {credentialsLoading ? <div role="status">正在读取数据库中的凭据...</div> : credentialsError ? (
+                <div className="alert alert-warning" role="alert">{credentialsError}</div>
+              ) : buildCredentialFields(credentialAccount).map((field) => {
                 const hasValue = field.value.trim().length > 0;
                 const displayValue = !hasValue
                   ? "-"

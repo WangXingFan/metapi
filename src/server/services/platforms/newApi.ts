@@ -3,9 +3,12 @@ import type { RequestInit as UndiciRequestInit } from 'undici';
 import { createContext, runInContext } from 'node:vm';
 import { withSiteProxyRequestInit } from '../siteProxy.js';
 import { fetchJsonWithShieldCookieRetry } from './newApiShield.js';
+import type { UpdateApiTokenOptions } from './base.js';
+import { findUpstreamToken } from './tokenManagement.js';
 
 export class NewApiAdapter extends BasePlatformAdapter {
   readonly platformName: string = 'new-api';
+  override readonly apiTokenCapabilities = { create: true, update: true, delete: true };
 
   async detect(url: string): Promise<boolean> {
     try {
@@ -265,7 +268,7 @@ export class NewApiAdapter extends BasePlatformAdapter {
 
   private normalizeTokenKeyForCompare(value?: string | null): string {
     const trimmed = (value || '').trim();
-    return trimmed.startsWith('Bearer ') ? trimmed.slice(7).trim() : trimmed;
+    return trimmed.replace(/^Bearer\s+/i, '').replace(/^sk-/i, '');
   }
 
   private parseGroupKeys(payload: any): string[] {
@@ -327,6 +330,45 @@ export class NewApiAdapter extends BasePlatformAdapter {
       normalized.push(tokenInfo);
     }
     return normalized;
+  }
+
+  private async resolveTokenItems(
+    items: any[],
+    request: (path: string, options?: UndiciRequestInit) => Promise<any>,
+  ): Promise<any[]> {
+    const maskedItems = items.filter((item) => typeof item?.key === 'string' && /[*•]/.test(item.key) && Number(item?.id) > 0);
+    const fullKeys = new Map<number, string>();
+    // New API rate-limits key reveals. Prefer its batch API for larger accounts.
+    if (maskedItems.length > 1) {
+      for (let offset = 0; offset < maskedItems.length; offset += 100) {
+        const batch = maskedItems.slice(offset, offset + 100);
+        try {
+          const response = await request('/api/token/batch/keys', {
+            method: 'POST', body: JSON.stringify({ ids: batch.map((item) => Number(item.id)) }),
+          });
+          if (response?.success) {
+            for (const item of batch) {
+              const key = response?.data?.keys?.[item.id];
+              if (typeof key === 'string' && key.trim() && !/[*•]/.test(key)) fullKeys.set(Number(item.id), key);
+            }
+          }
+        } catch {}
+      }
+    }
+    const resolved: any[] = [];
+    for (const item of items) {
+      let key = fullKeys.get(Number(item?.id)) || item?.key;
+      if (typeof key === 'string' && /[*•]/.test(key) && Number(item?.id) > 0) {
+        try {
+          const response = await request(`/api/token/${item.id}/key`, { method: 'POST' });
+          const fullKey = response?.data?.key;
+          if (response?.success && typeof fullKey === 'string' && !/[*•]/.test(fullKey)
+            && fullKey.trim()) key = fullKey;
+        } catch {}
+      }
+      resolved.push({ ...item, key });
+    }
+    return resolved;
   }
 
   private parseUserInfo(data: any): UserInfo {
@@ -814,7 +856,9 @@ export class NewApiAdapter extends BasePlatformAdapter {
         const headers: Record<string, string> = { Cookie: cookie };
         if (userId) headers['New-Api-User'] = String(userId);
         const res = await this.fetchJsonRaw<any>(`${baseUrl}/api/token/?p=0&size=100`, { headers });
-        const normalized = this.normalizeTokenItems(this.parseTokenItems(res));
+        const normalized = this.normalizeTokenItems(await this.resolveTokenItems(this.parseTokenItems(res), (path, options) => (
+          this.fetchJsonRaw<any>(`${baseUrl}${path}`, { ...options, headers })
+        )));
         if (normalized.length > 0) return normalized;
       } catch {}
     }
@@ -1373,7 +1417,11 @@ export class NewApiAdapter extends BasePlatformAdapter {
     if (!targetKey) return false;
     const resolvedUserId = platformUserId || await this.discoverUserId(baseUrl, accessToken);
 
-    const pickTokenId = (items: any[]): number | null => {
+    let confirmedAbsent = false;
+    const pickTokenId = async (list: any, request: (path: string, options?: UndiciRequestInit) => Promise<any>): Promise<number | null> => {
+      if (list?.success === false || !this.isTokenListResponse(list)) return null;
+      const items = await this.resolveTokenItems(this.parseTokenItems(list), request);
+      confirmedAbsent = items.every((item) => typeof item?.key === 'string' && !/[*•]/.test(item.key));
       for (const item of items) {
         const key = this.normalizeTokenKeyForCompare(item?.key);
         const id = Number.parseInt(String(item?.id), 10);
@@ -1390,7 +1438,9 @@ export class NewApiAdapter extends BasePlatformAdapter {
       const list = await this.fetchJson<any>(`${baseUrl}/api/token/?p=0&size=100`, {
         headers: this.authHeaders(accessToken, resolvedUserId || undefined),
       });
-      tokenId = pickTokenId(this.parseTokenItems(list));
+      tokenId = await pickTokenId(list, (path, options) => this.fetchJson<any>(`${baseUrl}${path}`, {
+        ...options, headers: this.authHeaders(accessToken, resolvedUserId || undefined),
+      }));
       if (tokenId) {
         const res = await this.fetchJson<any>(`${baseUrl}/api/token/${tokenId}`, {
           method: 'DELETE',
@@ -1408,7 +1458,7 @@ export class NewApiAdapter extends BasePlatformAdapter {
       try {
         if (!tokenId) {
           const list = await this.fetchJsonRaw<any>(`${baseUrl}/api/token/?p=0&size=100`, { headers });
-          tokenId = pickTokenId(this.parseTokenItems(list));
+          tokenId = await pickTokenId(list, (path, options) => this.fetchJsonRaw<any>(`${baseUrl}${path}`, { ...options, headers }));
         }
 
         if (!tokenId) continue;
@@ -1422,8 +1472,7 @@ export class NewApiAdapter extends BasePlatformAdapter {
     }
 
     // Upstream key already absent means local deletion is safe.
-    if (!tokenId) return true;
-    return false;
+    return !tokenId && confirmedAbsent;
   }
 
   private async getApiTokensWithUser(baseUrl: string, accessToken: string, userId: number | null): Promise<ApiTokenInfo[]> {
@@ -1431,7 +1480,9 @@ export class NewApiAdapter extends BasePlatformAdapter {
       const res = await this.fetchJson<any>(`${baseUrl}/api/token/?p=0&size=100`, {
         headers: this.authHeaders(accessToken, userId || undefined),
       });
-      const normalized = this.normalizeTokenItems(this.parseTokenItems(res));
+      const normalized = this.normalizeTokenItems(await this.resolveTokenItems(this.parseTokenItems(res), (path, options) => (
+        this.fetchJson<any>(`${baseUrl}${path}`, { ...options, headers: this.authHeaders(accessToken, userId || undefined) })
+      )));
       if (normalized.length > 0) return normalized;
       if (this.isTokenListResponse(res)) return [];
     } catch {}
@@ -1446,5 +1497,40 @@ export class NewApiAdapter extends BasePlatformAdapter {
     }
 
     return [];
+  }
+
+  override async updateApiToken(
+    baseUrl: string,
+    accessToken: string,
+    token: ApiTokenInfo,
+    options: UpdateApiTokenOptions,
+    platformUserId?: number,
+  ): Promise<boolean> {
+    const userId = platformUserId || await this.discoverUserId(baseUrl, accessToken);
+    const updateWith = async (request: (path: string, options?: UndiciRequestInit) => Promise<any>) => {
+      const list = await request('/api/token/?p=0&size=100');
+      const target = findUpstreamToken(this.parseTokenItems(list), token);
+      if (!target) return false;
+      const detail = await request(`/api/token/${target.id}`);
+      if (!detail?.success || Number(detail.data?.id) !== Number(target.id)) return false;
+      const result = await request('/api/token/', {
+        method: 'PUT', body: JSON.stringify({ ...detail.data, ...options }),
+      });
+      return result?.success === true;
+    };
+    try {
+      if (await updateWith((path, options) => this.fetchJson<any>(`${baseUrl}${path}`, {
+        ...options, headers: this.authHeaders(accessToken, userId || undefined),
+      }))) return true;
+    } catch {}
+    const cookieUserId = userId || await this.probeUserIdByCookie(baseUrl, accessToken);
+    for (const cookie of this.buildCookieCandidates(accessToken)) {
+      const headers: Record<string, string> = { Cookie: cookie };
+      if (cookieUserId) headers['New-Api-User'] = String(cookieUserId);
+      try {
+        if (await updateWith((path, options) => this.fetchJsonRaw<any>(`${baseUrl}${path}`, { ...options, headers }))) return true;
+      } catch {}
+    }
+    return false;
   }
 }

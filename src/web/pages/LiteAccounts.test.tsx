@@ -7,6 +7,7 @@ import LiteAccounts from './LiteAccounts.js';
 const { apiMock } = vi.hoisted(() => ({
   apiMock: {
     getAccountsSnapshot: vi.fn(),
+    getAccountCredentials: vi.fn(),
     getRuntimeSettings: vi.fn(),
     updateRuntimeSettings: vi.fn(),
     updateAccount: vi.fn(),
@@ -36,6 +37,7 @@ describe('LiteAccounts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMock.getAccountsSnapshot.mockResolvedValue({ accounts: [], sites: [] });
+    apiMock.getAccountCredentials.mockResolvedValue({ id: 101, accessToken: 'session-secret-token', apiToken: null, platformUserId: 7788 });
     apiMock.getRuntimeSettings.mockResolvedValue({
       checkinScheduleMode: 'cron',
       checkinSpreadIntervalMinutes: 5,
@@ -306,7 +308,6 @@ describe('LiteAccounts', () => {
           id: 101,
           username: 'Alpha Account',
           credentialMode: 'session',
-          accessToken: 'session-secret-token',
           extraConfig: JSON.stringify({ platformUserId: 7788 }),
           site: { id: 1, name: 'Alpha Site', url: 'https://alpha.example' },
         },
@@ -337,6 +338,8 @@ describe('LiteAccounts', () => {
       await act(async () => {
         credentialsButton.props.onClick();
       });
+      await flushMicrotasks();
+      expect(apiMock.getAccountCredentials).toHaveBeenCalledWith(101);
 
       let text = collectText(root.root);
       expect(text).toContain('查看凭据');

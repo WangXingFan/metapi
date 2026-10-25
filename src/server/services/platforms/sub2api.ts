@@ -23,6 +23,7 @@ function normalizeBaseUrl(baseUrl: string): string {
  * Balance is derived from a USD amount returned by /api/v1/auth/me.
  */
 export class Sub2ApiAdapter extends BasePlatformAdapter {
+  override readonly apiTokenCapabilities = { create: true, update: false, delete: true };
   readonly platformName = 'sub2api';
 
   private roundCurrency(value: number): number {

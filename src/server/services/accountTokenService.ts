@@ -201,7 +201,7 @@ export async function ensureDefaultTokenForAccount(
     .where(eq(schema.accountTokens.accountId, accountId))
     .all();
 
-  let target = tokens.find((t) => t.token === normalizedToken) || null;
+  let target = tokens.find((t) => normalizeTokenForDisplay(t.token) === normalizeTokenForDisplay(normalizedToken)) || null;
   if (!target) {
     const inserted = await db.insert(schema.accountTokens)
       .values({
@@ -225,8 +225,8 @@ export async function ensureDefaultTokenForAccount(
   } else {
     await db.update(schema.accountTokens)
       .set({
-        name: options?.name ? normalizeTokenName(options.name) : target.name,
-        tokenGroup,
+        name: options?.name && options.name !== 'default' ? normalizeTokenName(options.name) : target.name,
+        tokenGroup: options?.tokenGroup !== undefined ? tokenGroup : target.tokenGroup ?? tokenGroup,
         valueStatus: ACCOUNT_TOKEN_VALUE_STATUS_READY,
         source: options?.source || target.source || 'manual',
         enabled: options?.enabled ?? target.enabled,
@@ -307,6 +307,17 @@ export async function syncTokensFromUpstream(accountId: number, upstreamTokens: 
   const pendingTokenIds: number[] = [];
   let index = existing.length + 1;
 
+  const removeDuplicates = async (target: AccountTokenRow, duplicates: AccountTokenRow[]) => {
+    for (const duplicate of duplicates) {
+      // Keep routes attached to the surviving credential when repairing old duplicates.
+      await db.update(schema.routeChannels).set({ tokenId: target.id })
+        .where(eq(schema.routeChannels.tokenId, duplicate.id)).run();
+      await db.delete(schema.accountTokens).where(eq(schema.accountTokens.id, duplicate.id)).run();
+      const duplicateIndex = existing.findIndex((row) => row.id === duplicate.id);
+      if (duplicateIndex >= 0) existing.splice(duplicateIndex, 1);
+    }
+  };
+
   for (const upstream of upstreamTokens) {
     const tokenValue = normalizeTokenValue(upstream.key);
     if (!tokenValue) continue;
@@ -317,10 +328,25 @@ export async function syncTokensFromUpstream(accountId: number, upstreamTokens: 
       ? ACCOUNT_TOKEN_VALUE_STATUS_MASKED_PENDING
       : ACCOUNT_TOKEN_VALUE_STATUS_READY;
 
-    const byToken = existing.find((row) => (
-      row.token === tokenValue
+    const exactMatches = existing.filter((row) => (
+      normalizeTokenForDisplay(row.token) === normalizeTokenForDisplay(tokenValue)
       && resolveAccountTokenValueStatus(row) === ACCOUNT_TOKEN_VALUE_STATUS_READY
     ));
+    const byToken = exactMatches.find((row) => row.isDefault) || exactMatches[0];
+    // Groups are mutable metadata. Only use them to disambiguate masks when the
+    // upstream snapshot actually contains more than one token with this name/mask.
+    const ambiguousUpstreamMask = upstreamTokens.filter((other) => (
+      other.name?.trim() === tokenName
+      && (normalizeMaskedTokenForCompare(other.key) === normalizeMaskedTokenForCompare(tokenValue)
+        || (!isMaskedTokenValue(other.key) && matchesMaskedTokenValue(other.key, tokenValue)))
+    )).length > 1;
+    const matchesPlaceholder = (row: AccountTokenRow) => (
+      isMaskedPendingAccountToken(row)
+      && row.name === tokenName
+      && (normalizeMaskedTokenForCompare(row.token) === normalizeMaskedTokenForCompare(tokenValue)
+        || matchesMaskedTokenValue(tokenValue, row.token))
+      && (!ambiguousUpstreamMask || sameTokenGroup(row.tokenGroup, row.name, tokenGroup, tokenName))
+    );
     if (byToken) {
       await db.update(schema.accountTokens)
         .set({
@@ -339,6 +365,9 @@ export async function syncTokensFromUpstream(accountId: number, upstreamTokens: 
       byToken.enabled = enabled;
       byToken.source = 'sync';
       byToken.updatedAt = now;
+      await removeDuplicates(byToken, existing.filter((row) => (
+        row.id !== byToken.id && (exactMatches.includes(row) || matchesPlaceholder(row))
+      )));
       updated++;
       continue;
     }
@@ -348,19 +377,17 @@ export async function syncTokensFromUpstream(accountId: number, upstreamTokens: 
         resolveAccountTokenValueStatus(row) === ACCOUNT_TOKEN_VALUE_STATUS_READY
         && matchesMaskedTokenValue(row.token, tokenValue)
         && row.name === tokenName
-        && sameTokenGroup(row.tokenGroup, row.name, tokenGroup, tokenName)
+        && (!ambiguousUpstreamMask || sameTokenGroup(row.tokenGroup, row.name, tokenGroup, tokenName))
       ))
       : [];
-    const readyMaskedMatch = matchingReadyByMaskedValue.length === 1
-      ? matchingReadyByMaskedValue[0]
+    const distinctReadyValues = new Set(matchingReadyByMaskedValue.map((row) => normalizeTokenForDisplay(row.token)));
+    const readyMaskedMatch = distinctReadyValues.size === 1
+      ? matchingReadyByMaskedValue.find((row) => row.isDefault) || matchingReadyByMaskedValue[0]
       : null;
     if (readyMaskedMatch) {
       const staleMaskedPlaceholders = existing.filter((row) => (
         row.id !== readyMaskedMatch.id
-        && resolveAccountTokenValueStatus(row) === ACCOUNT_TOKEN_VALUE_STATUS_MASKED_PENDING
-        && matchesMaskedTokenValue(row.token, tokenValue)
-        && row.name === tokenName
-        && sameTokenGroup(row.tokenGroup, row.name, tokenGroup, tokenName)
+        && (matchesPlaceholder(row) || matchingReadyByMaskedValue.includes(row))
       ));
 
       await db.update(schema.accountTokens)
@@ -381,25 +408,14 @@ export async function syncTokensFromUpstream(accountId: number, upstreamTokens: 
       readyMaskedMatch.source = 'sync';
       readyMaskedMatch.updatedAt = now;
 
-      if (staleMaskedPlaceholders.length > 0) {
-        for (const placeholder of staleMaskedPlaceholders) {
-          await db.delete(schema.accountTokens)
-            .where(eq(schema.accountTokens.id, placeholder.id))
-            .run();
-        }
-        for (const placeholder of staleMaskedPlaceholders) {
-          const placeholderIndex = existing.findIndex((row) => row.id === placeholder.id);
-          if (placeholderIndex >= 0) {
-            existing.splice(placeholderIndex, 1);
-          }
-        }
-      }
+      await removeDuplicates(readyMaskedMatch, staleMaskedPlaceholders);
 
       updated++;
       continue;
     }
 
-    const matchingPlaceholder = existing.find((row) => (
+    const matchingPlaceholders = existing.filter(matchesPlaceholder);
+    const matchingPlaceholder = matchingPlaceholders[0] || existing.find((row) => (
       isMaskedPendingAccountToken(row)
       && row.name === tokenName
       && sameTokenGroup(row.tokenGroup, row.name, tokenGroup, tokenName)
@@ -428,6 +444,7 @@ export async function syncTokensFromUpstream(accountId: number, upstreamTokens: 
       matchingPlaceholder.enabled = nextEnabled;
       matchingPlaceholder.isDefault = false;
       matchingPlaceholder.updatedAt = now;
+      await removeDuplicates(matchingPlaceholder, matchingPlaceholders.filter((row) => row.id !== matchingPlaceholder.id));
       updated++;
       if (nextValueStatus === ACCOUNT_TOKEN_VALUE_STATUS_MASKED_PENDING) {
         maskedPending++;

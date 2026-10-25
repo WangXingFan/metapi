@@ -28,6 +28,7 @@ const accountTokenUpdatePayloadSchema = z.object({
   enabled: z.boolean().optional(),
   isDefault: z.boolean().optional(),
   source: z.string().optional(),
+  syncUpstream: z.boolean().optional(),
 }).passthrough();
 
 const accountTokenSyncAllPayloadSchema = z.object({
@@ -81,6 +82,9 @@ function formatAccountTokenPayloadError(error: z.ZodError): string {
   }
   if (firstPath === 'wait') {
     return 'Invalid wait. Expected boolean.';
+  }
+  if (firstPath === 'syncUpstream') {
+    return 'Invalid syncUpstream. Expected boolean.';
   }
   return 'Invalid account token payload.';
 }

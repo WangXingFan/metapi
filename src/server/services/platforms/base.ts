@@ -92,8 +92,12 @@ export interface CreateApiTokenOptions {
 
 export type CreateApiTokenResult = boolean | ApiTokenInfo | null;
 
+export type ApiTokenCapabilities = { create: boolean; update: boolean; delete: boolean };
+export type UpdateApiTokenOptions = { name?: string; group?: string };
+
 export interface PlatformAdapter {
   readonly platformName: string;
+  readonly apiTokenCapabilities: ApiTokenCapabilities;
   detect(url: string): Promise<boolean>;
   login(baseUrl: string, username: string, password: string): Promise<LoginResult>;
   getUserInfo(baseUrl: string, accessToken: string, platformUserId?: number): Promise<UserInfo | null>;
@@ -107,10 +111,12 @@ export interface PlatformAdapter {
   getUserGroups(baseUrl: string, accessToken: string, platformUserId?: number): Promise<string[]>;
   createApiToken(baseUrl: string, accessToken: string, platformUserId?: number, options?: CreateApiTokenOptions): Promise<CreateApiTokenResult>;
   deleteApiToken(baseUrl: string, accessToken: string, tokenKey: string, platformUserId?: number): Promise<boolean>;
+  updateApiToken(baseUrl: string, accessToken: string, token: ApiTokenInfo, options: UpdateApiTokenOptions, platformUserId?: number): Promise<boolean>;
 }
 
 export abstract class BasePlatformAdapter implements PlatformAdapter {
   abstract readonly platformName: string;
+  readonly apiTokenCapabilities: ApiTokenCapabilities = { create: false, update: false, delete: false };
 
   abstract detect(url: string): Promise<boolean>;
   abstract checkin(baseUrl: string, accessToken: string, platformUserId?: number): Promise<CheckinResult>;
@@ -216,6 +222,16 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
     _baseUrl: string,
     _accessToken: string,
     _tokenKey: string,
+    _platformUserId?: number,
+  ): Promise<boolean> {
+    return false;
+  }
+
+  async updateApiToken(
+    _baseUrl: string,
+    _accessToken: string,
+    _token: ApiTokenInfo,
+    _options: UpdateApiTokenOptions,
     _platformUserId?: number,
   ): Promise<boolean> {
     return false;

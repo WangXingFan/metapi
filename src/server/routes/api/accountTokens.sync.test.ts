@@ -11,16 +11,20 @@ const getApiTokenMock = vi.fn();
 const createApiTokenMock = vi.fn();
 const getUserGroupsMock = vi.fn();
 const deleteApiTokenMock = vi.fn();
+const updateApiTokenMock = vi.fn();
+const apiTokenCapabilities = { create: true, update: true, delete: true };
 
 type AccountTokenServiceModule = typeof import('../../services/accountTokenService.js');
 
 vi.mock('../../services/platforms/index.js', () => ({
   getAdapter: () => ({
+    apiTokenCapabilities,
     getApiTokens: (...args: unknown[]) => getApiTokensMock(...args),
     getApiToken: (...args: unknown[]) => getApiTokenMock(...args),
     createApiToken: (...args: unknown[]) => createApiTokenMock(...args),
     getUserGroups: (...args: unknown[]) => getUserGroupsMock(...args),
     deleteApiToken: (...args: unknown[]) => deleteApiTokenMock(...args),
+    updateApiToken: (...args: unknown[]) => updateApiTokenMock(...args),
   }),
 }));
 
@@ -31,6 +35,7 @@ describe('account tokens sync routes with site status', () => {
   let db: DbModule['db'];
   let schema: DbModule['schema'];
   let maskToken: AccountTokenServiceModule['maskToken'];
+  let ensureDefaultTokenForAccount: AccountTokenServiceModule['ensureDefaultTokenForAccount'];
   let closeDbConnections: DbModule['closeDbConnections'];
   let dataDir = '';
   let previousDataDir: string | undefined;
@@ -77,6 +82,7 @@ describe('account tokens sync routes with site status', () => {
     schema = dbModule.schema;
     closeDbConnections = dbModule.closeDbConnections;
     maskToken = accountTokenServiceModule.maskToken;
+    ensureDefaultTokenForAccount = accountTokenServiceModule.ensureDefaultTokenForAccount;
 
     app = Fastify();
     await app.register(routesModule.accountTokensRoutes);
@@ -88,6 +94,8 @@ describe('account tokens sync routes with site status', () => {
     createApiTokenMock.mockReset();
     getUserGroupsMock.mockReset();
     deleteApiTokenMock.mockReset();
+    updateApiTokenMock.mockReset();
+    apiTokenCapabilities.update = true;
     seedId = 0;
 
     await db.delete(schema.accountTokens).run();
@@ -109,6 +117,89 @@ describe('account tokens sync routes with site status', () => {
       process.env.DATA_DIR = previousDataDir;
     }
     rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('keeps upstream metadata when ensuring an already-synced token is the default', async () => {
+    const { account } = await seedAccount({});
+    const token = await db.insert(schema.accountTokens).values({ accountId: account.id, name: 'website-name', token: 'upstream-token', tokenGroup: 'cckpro', source: 'sync' }).returning().get();
+    expect(await ensureDefaultTokenForAccount(account.id, 'sk-upstream-token', { name: 'default', source: 'sync' })).toBe(token.id);
+    const latest = await db.select().from(schema.accountTokens).where(eq(schema.accountTokens.id, token.id)).get();
+    expect(latest).toMatchObject({ name: 'website-name', tokenGroup: 'cckpro', isDefault: true });
+  });
+
+  it.each(['ready', 'masked_pending'])('updates changed groups and repairs stale duplicates for %s tokens', async (valueStatus) => {
+    const { account } = await seedAccount({});
+    const fullKey = 'sk-regression-group-1234';
+    const maskedKey = maskToken(fullKey);
+    const original = await db.insert(schema.accountTokens).values({
+      accountId: account.id, name: 'cck-key', token: valueStatus === 'ready' ? fullKey : maskedKey,
+      tokenGroup: 'cckcc', valueStatus, source: 'sync', enabled: valueStatus === 'ready', isDefault: valueStatus === 'ready',
+    }).returning().get();
+    await db.insert(schema.accountTokens).values({
+      accountId: account.id, name: 'cck-key', token: maskedKey, tokenGroup: 'cckpro',
+      valueStatus: 'masked_pending', source: 'sync', enabled: false,
+    }).run();
+    getApiTokensMock.mockResolvedValue([{ name: 'cck-key', key: maskedKey, tokenGroup: 'cckpro', enabled: true }]);
+    for (let i = 0; i < 2; i++) {
+      const response = await app.inject({ method: 'POST', url: `/api/account-tokens/sync/${account.id}` });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ created: 0, total: 1 });
+      const rows = await db.select().from(schema.accountTokens).where(eq(schema.accountTokens.accountId, account.id)).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ id: original.id, tokenGroup: 'cckpro', valueStatus });
+      if (valueStatus === 'ready') expect(rows[0].token).toBe(fullKey);
+    }
+  });
+
+  it.each([false, true])('merges full key duplicates while retaining the default and routes (upstream masked: %s)', async (masked) => {
+    const { account } = await seedAccount({});
+    const original = await db.insert(schema.accountTokens).values({
+      accountId: account.id, name: 'key', token: 'same-full-key', tokenGroup: 'cckcc', enabled: true,
+    }).returning().get();
+    const preferred = await db.insert(schema.accountTokens).values({
+      accountId: account.id, name: 'key', token: 'sk-same-full-key', tokenGroup: 'cckpro', enabled: true, isDefault: true,
+    }).returning().get();
+    const route = await db.insert(schema.tokenRoutes).values({ modelPattern: 'gpt-test' }).returning().get();
+    const channel = await db.insert(schema.routeChannels).values({ routeId: route.id, accountId: account.id, tokenId: original.id }).returning().get();
+    getApiTokensMock.mockResolvedValue([{ name: 'key', key: masked ? maskToken('same-full-key') : 'same-full-key', tokenGroup: 'cckpro' }]);
+    const response = await app.inject({ method: 'POST', url: `/api/account-tokens/sync/${account.id}` });
+    expect(response.json()).toMatchObject({ created: 0, total: 1, defaultTokenId: preferred.id });
+    const latestChannel = await db.select().from(schema.routeChannels).where(eq(schema.routeChannels.id, channel.id)).get();
+    expect(latestChannel?.tokenId).toBe(preferred.id);
+  });
+
+  it('preserves different upstream keys sharing a name and mask in different groups', async () => {
+    const { account } = await seedAccount({});
+    for (const group of ['cckcc', 'cckpro']) {
+      await db.insert(schema.accountTokens).values({ accountId: account.id, name: 'shared', token: 'sk-abc***1234', tokenGroup: group, valueStatus: 'masked_pending', enabled: false }).run();
+    }
+    getApiTokensMock.mockResolvedValue(['cckcc', 'cckpro'].map((tokenGroup) => ({ name: 'shared', key: 'sk-abc***1234', tokenGroup })));
+    const response = await app.inject({ method: 'POST', url: `/api/account-tokens/sync/${account.id}` });
+    expect(response.json()).toMatchObject({ created: 0, total: 2 });
+  });
+
+  it.each([true, false])('writes names and groups upstream before saving locally (upstream success: %s)', async (success) => {
+    const { account, site } = await seedAccount({});
+    const token = await db.insert(schema.accountTokens).values({ accountId: account.id, name: 'old', token: 'sk-full-key', tokenGroup: 'cckcc', enabled: true }).returning().get();
+    updateApiTokenMock.mockImplementation(async () => {
+      const current = await db.select().from(schema.accountTokens).where(eq(schema.accountTokens.id, token.id)).get();
+      expect(current?.tokenGroup).toBe('cckcc');
+      return success;
+    });
+    const response = await app.inject({ method: 'PUT', url: `/api/account-tokens/${token.id}`, payload: { name: 'new', group: 'cckpro', syncUpstream: true } });
+    expect(response.statusCode).toBe(success ? 200 : 502);
+    expect(updateApiTokenMock).toHaveBeenCalledWith(site.url, account.accessToken, { name: 'old', key: 'sk-full-key', tokenGroup: 'cckcc' }, { name: 'new', group: 'cckpro' }, undefined);
+    const latest = await db.select().from(schema.accountTokens).where(eq(schema.accountTokens.id, token.id)).get();
+    expect(latest).toMatchObject({ name: success ? 'new' : 'old', tokenGroup: success ? 'cckpro' : 'cckcc' });
+  });
+
+  it('rejects upstream updates for platforms without update capability', async () => {
+    const { account } = await seedAccount({});
+    const token = await db.insert(schema.accountTokens).values({ accountId: account.id, name: 'key', token: 'sk-key', tokenGroup: 'cckcc' }).returning().get();
+    apiTokenCapabilities.update = false;
+    const response = await app.inject({ method: 'PUT', url: `/api/account-tokens/${token.id}`, payload: { group: 'cckpro', syncUpstream: true } });
+    expect(response.statusCode).toBe(400);
+    expect(updateApiTokenMock).not.toHaveBeenCalled();
   });
 
   it('returns skipped for single-account sync when site is disabled', async () => {

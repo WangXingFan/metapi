@@ -4,6 +4,7 @@ import {
   getCredentialModeFromExtraConfig,
   hasOauthProvider,
   type AccountCredentialMode,
+  resolvePlatformUserId,
 } from "./accountExtraConfig.js";
 import {
   buildRuntimeHealthForAccount,
@@ -230,4 +231,15 @@ export async function getAccountsSnapshot(options?: {
     persistence: accountsSnapshotPersistence,
     loader: loadAccountsSnapshotPayload,
   });
+}
+
+export async function getAccountStoredCredentials(accountId: number) {
+  const account = await db.select().from(schema.accounts).where(eq(schema.accounts.id, accountId)).get();
+  if (!account) return null;
+  return {
+    id: account.id,
+    accessToken: account.accessToken,
+    apiToken: account.apiToken,
+    platformUserId: resolvePlatformUserId(account.extraConfig, account.username) ?? null,
+  };
 }

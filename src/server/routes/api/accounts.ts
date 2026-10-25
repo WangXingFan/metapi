@@ -37,7 +37,7 @@ import {
   withSiteRecordProxyRequestInit,
 } from "../../services/siteProxy.js";
 import { createRateLimitGuard } from "../../middleware/requestRateLimit.js";
-import { getAccountsSnapshot } from "../../services/accountsOverviewService.js";
+import { getAccountsSnapshot, getAccountStoredCredentials } from "../../services/accountsOverviewService.js";
 import {
   type AccountCreatePayload,
   parseAccountBatchPayload,
@@ -481,6 +481,17 @@ async function executeRefreshAccountRuntimeHealth(accountId?: number) {
 }
 
 export async function accountsRoutes(app: FastifyInstance) {
+  app.get<{ Params: { id: string } }>("/api/accounts/:id/credentials", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const accountId = Number(request.params.id);
+    if (!Number.isInteger(accountId) || accountId <= 0) {
+      return reply.code(400).send({ message: "账号 ID 无效" });
+    }
+    const credentials = await getAccountStoredCredentials(accountId);
+    if (!credentials) return reply.code(404).send({ message: "账号不存在" });
+    return credentials;
+  });
+
   // List all accounts (with site info)
   app.get<{ Querystring: { refresh?: string } }>(
     "/api/accounts",

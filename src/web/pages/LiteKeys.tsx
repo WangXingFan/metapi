@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api } from "../api.js";
-import CenteredModal from "../components/CenteredModal.js";
+import AccountTokenDialog from "./lite/AccountTokenDialog.js";
 import {
   ColumnVisibilityControl,
   type ColumnOption,
@@ -105,8 +105,7 @@ export default function LiteKeys() {
   const [search, setSearch] = useState("");
   const [actionId, setActionId] = useState("");
   const [editingToken, setEditingToken] = useState<TokenItem | null>(null);
-  const [editTokenValue, setEditTokenValue] = useState("");
-  const [savingToken, setSavingToken] = useState(false);
+  const [tokenDialogMode, setTokenDialogMode] = useState<"create" | "edit" | "complete" | null>(null);
 
   const requestedSiteId = useMemo(
     () => parsePositiveInt(new URLSearchParams(location.search).get("siteId")),
@@ -285,7 +284,9 @@ export default function LiteKeys() {
     const tokenName = token.name || "未命名 key";
     const confirmed = await confirm({
       title: "删除账号 Key",
-      message: `确定删除 key“${tokenName}”吗？将优先同步删除上游站点 key。`,
+      message: isMaskedPendingToken(token)
+        ? `确定删除 key“${tokenName}”的本地记录吗？此 Key 尚未补全，上游 Key 请在网站删除。`
+        : `确定删除 key“${tokenName}”吗？将同步删除上游站点 key。`,
       confirmText: "删除",
       tone: "danger",
     });
@@ -294,7 +295,7 @@ export default function LiteKeys() {
     setActionId(`delete-token-${token.id}`);
     try {
       await api.deleteAccountToken(token.id);
-      toast.success("key 已删除");
+      toast.success(isMaskedPendingToken(token) ? "本地 key 记录已删除" : "key 已删除");
       await load();
     } catch (error: any) {
       const message = error?.message || "删除 key 失败";
@@ -324,38 +325,12 @@ export default function LiteKeys() {
 
   const openCompleteToken = (token: TokenItem) => {
     setEditingToken(token);
-    setEditTokenValue("");
+    setTokenDialogMode("complete");
   };
 
-  const closeCompleteToken = () => {
-    setEditingToken(null);
-    setEditTokenValue("");
-    setSavingToken(false);
-  };
-
-  const saveCompleteToken = async () => {
-    if (!editingToken) return;
-    const tokenValue = editTokenValue.trim();
-    if (!tokenValue) {
-      toast.error("请粘贴完整明文 key");
-      return;
-    }
-
-    setSavingToken(true);
-    try {
-      await api.updateAccountToken(editingToken.id, {
-        token: tokenValue,
-        enabled: true,
-        isDefault: editingToken.isDefault,
-      });
-      toast.success("完整 key 已保存");
-      closeCompleteToken();
-      await load();
-    } catch (error: any) {
-      toast.error(error?.message || "保存完整 key 失败");
-    } finally {
-      setSavingToken(false);
-    }
+  const openEditToken = (token: TokenItem) => {
+    setEditingToken(token);
+    setTokenDialogMode("edit");
   };
 
   const {
@@ -376,16 +351,21 @@ export default function LiteKeys() {
       <div className="page-header">
         <div>
           <h2 className="page-title">账号 Key</h2>
-          <p className="page-subtitle">同步、补全、复制站点账号下挂载的 API Key</p>
+          <p className="page-subtitle">同步站点分组，新增、编辑、删除账号 API Key</p>
         </div>
-        <RefreshButton onRefresh={load} refreshing={loading} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" className="btn btn-primary" disabled={loading || !accounts.some((account) => account.credentialMode !== "apikey")} onClick={() => { setEditingToken(null); setTokenDialogMode("create"); }}>
+            新建 Key
+          </button>
+          <RefreshButton onRefresh={load} refreshing={loading} />
+        </div>
       </div>
 
       <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "minmax(180px, 220px) minmax(180px, 220px) minmax(220px, 1fr) auto",
+            gridTemplateColumns: isMobile ? "1fr" : "minmax(180px, 220px) minmax(180px, 220px) minmax(220px, 1fr) auto",
             gap: 12,
             alignItems: "end",
           }}
@@ -516,6 +496,9 @@ export default function LiteKeys() {
                                   复制
                                 </button>
                               )}
+                              <button type="button" className="btn btn-link" onClick={() => openEditToken(token)}>
+                                编辑 / 分组
+                              </button>
                               <button
                                 type="button"
                                 className="btn btn-link"
@@ -610,6 +593,9 @@ export default function LiteKeys() {
                                         {actionId === `copy-token-${token.id}` ? "复制中..." : "复制"}
                                       </button>
                                     )}
+                                    <button type="button" className="btn btn-link" onClick={() => openEditToken(token)}>
+                                      编辑 / 分组
+                                    </button>
                                     <button
                                       type="button"
                                       className="btn btn-link"
@@ -762,42 +748,18 @@ export default function LiteKeys() {
         )}
       </div>
 
-      {editingToken ? (
-        <CenteredModal
-          open
-          title="补全完整 key"
-          onClose={closeCompleteToken}
-          maxWidth={520}
-          footer={(
-            <>
-              <button type="button" className="btn btn-ghost" onClick={closeCompleteToken} disabled={savingToken}>
-                取消
-              </button>
-              <button type="button" className="btn btn-primary" onClick={() => void saveCompleteToken()} disabled={savingToken}>
-                {savingToken ? "保存中..." : "保存完整 key"}
-              </button>
-            </>
-          )}
-        >
-          <div style={{ display: "grid", gap: 12 }}>
-            <div className="alert alert-warning">
-              当前本地只有上游返回的脱敏值：
-              <span style={{ ...monoTextStyle, marginLeft: 6 }}>{editingToken.tokenMasked || "-"}</span>
-              。请从上游站点复制完整 key，或重新生成后粘贴到这里。
-            </div>
-            <label>
-              <div style={fieldLabelStyle}>完整明文 key</div>
-              <input
-                type="password"
-                value={editTokenValue}
-                onChange={(event) => setEditTokenValue(event.target.value)}
-                placeholder="粘贴完整 key，例如 sk-..."
-                style={inputStyle}
-                autoFocus
-              />
-            </label>
-          </div>
-        </CenteredModal>
+      {tokenDialogMode ? (
+        <AccountTokenDialog
+          mode={tokenDialogMode}
+          token={editingToken || undefined}
+          accounts={accounts.filter((account) => account.credentialMode !== "apikey").map((account) => ({
+            id: account.id,
+            label: `${account.site?.name || "-"} / ${resolveAccountName(account)}`,
+          }))}
+          initialAccountId={selectedSessionAccount?.id || sessionAccounts[0]?.id}
+          onClose={() => { setTokenDialogMode(null); setEditingToken(null); }}
+          onSaved={load}
+        />
       ) : null}
     </div>
   );

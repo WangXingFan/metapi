@@ -7,15 +7,14 @@ import {
   ACCOUNT_TOKEN_VALUE_STATUS_READY,
   isMaskedPendingAccountToken,
   isMaskedTokenValue,
-  isUsableAccountToken,
   listTokensWithRelations,
   normalizeTokenForDisplay,
   maskToken,
   repairDefaultToken,
-  resolveAccountTokenValueStatus,
   setDefaultToken,
 } from '../../services/accountTokenService.js';
 import { getAdapter } from '../../services/platforms/index.js';
+import { updateAccountToken } from '../../services/accountTokenMutationService.js';
 import { getCredentialModeFromExtraConfig, getProxyUrlFromExtraConfig, resolvePlatformUserId } from '../../services/accountExtraConfig.js';
 import { startBackgroundTask } from '../../services/backgroundTaskService.js';
 import { withAccountProxyOverride } from '../../services/siteProxy.js';
@@ -811,75 +810,11 @@ export async function accountTokensRoutes(app: FastifyInstance) {
       return reply.code(400).send({ success: false, message: '令牌 ID 无效' });
     }
 
-    const existing = await db.select().from(schema.accountTokens).where(eq(schema.accountTokens.id, tokenId)).get();
-    if (!existing) {
-      return reply.code(404).send({ success: false, message: '令牌不存在' });
+    const result = await updateAccountToken(tokenId, parsedBody.data);
+    if (!result.success) {
+      return reply.code(result.statusCode).send({ success: false, message: result.message });
     }
-
-    const owner = await db.select().from(schema.accounts).where(eq(schema.accounts.id, existing.accountId)).get();
-    if (!owner) {
-      return reply.code(404).send({ success: false, message: '账号不存在' });
-    }
-    if (isApiKeyConnection(owner)) {
-      return reply.code(400).send({ success: false, message: 'API Key 连接不支持管理账号令牌' });
-    }
-
-    const body = parsedBody.data;
-    const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
-    let nextValueStatus = resolveAccountTokenValueStatus(existing);
-
-    if (body.name !== undefined) {
-      updates.name = (body.name || '').trim() || existing.name;
-    }
-
-    if (body.token !== undefined) {
-      const tokenValue = body.token.trim();
-      if (!tokenValue) {
-        return reply.code(400).send({ success: false, message: '令牌不能为空' });
-      }
-      updates.token = tokenValue;
-      nextValueStatus = isMaskedTokenValue(tokenValue)
-        ? ACCOUNT_TOKEN_VALUE_STATUS_MASKED_PENDING
-        : ACCOUNT_TOKEN_VALUE_STATUS_READY;
-      updates.valueStatus = nextValueStatus;
-    }
-
-    if (body.group !== undefined) {
-      updates.tokenGroup = (body.group || '').trim() || null;
-    }
-
-    if (nextValueStatus === ACCOUNT_TOKEN_VALUE_STATUS_MASKED_PENDING) {
-      updates.enabled = false;
-      updates.isDefault = false;
-    } else {
-      if (body.enabled !== undefined) updates.enabled = body.enabled;
-      if (body.isDefault !== undefined) updates.isDefault = body.isDefault;
-    }
-    if (body.source !== undefined) updates.source = body.source;
-
-    await db.update(schema.accountTokens).set(updates).where(eq(schema.accountTokens.id, tokenId)).run();
-
-    let latest = await db.select().from(schema.accountTokens).where(eq(schema.accountTokens.id, tokenId)).get();
-    if (!latest) {
-      return reply.code(500).send({ success: false, message: '更新失败' });
-    }
-
-    if (body.isDefault === true && isUsableAccountToken(latest)) {
-      await setDefaultToken(tokenId);
-    } else if (latest.isDefault && isUsableAccountToken(latest)) {
-      await setDefaultToken(tokenId);
-    } else if (existing.isDefault && !isUsableAccountToken(latest)) {
-      await repairDefaultToken(existing.accountId);
-    } else if (body.isDefault === false && existing.isDefault) {
-      await repairDefaultToken(existing.accountId);
-    }
-
-    latest = await db.select().from(schema.accountTokens).where(eq(schema.accountTokens.id, tokenId)).get();
-    if (!latest) {
-      return reply.code(500).send({ success: false, message: '更新失败' });
-    }
-
-    return { success: true, token: latest };
+    return result;
   });
 
   app.post<{ Params: { id: string } }>('/api/account-tokens/:id/default', async (request, reply) => {
@@ -981,7 +916,7 @@ export async function accountTokensRoutes(app: FastifyInstance) {
         () => adapter.getUserGroups(site.url, account.accessToken, platformUserId),
       );
       const normalized = Array.from(new Set((groups || []).map((item) => String(item || '').trim()).filter(Boolean)));
-      return { success: true, groups: normalized.length > 0 ? normalized : ['default'] };
+      return { success: true, groups: normalized.length > 0 ? normalized : ['default'], capabilities: adapter.apiTokenCapabilities };
     } catch (error: any) {
       return reply.code(502).send({
         success: false,

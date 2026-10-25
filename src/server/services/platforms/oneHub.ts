@@ -2,6 +2,7 @@ import { OneApiAdapter } from './oneApi.js';
 
 export class OneHubAdapter extends OneApiAdapter {
   readonly platformName: string = 'one-hub';
+  override readonly apiTokenCapabilities = { create: true, update: false, delete: true };
 
   async detect(url: string): Promise<boolean> {
     const normalized = url.toLowerCase();

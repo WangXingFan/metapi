@@ -1,4 +1,5 @@
-import { ApiTokenInfo, BasePlatformAdapter, CheckinResult, BalanceInfo, CreateApiTokenOptions } from './base.js';
+import { ApiTokenInfo, BasePlatformAdapter, CheckinResult, BalanceInfo, CreateApiTokenOptions, type UpdateApiTokenOptions } from './base.js';
+import { findUpstreamToken } from './tokenManagement.js';
 
 type CreateApiTokenPayload = {
   name: string;
@@ -13,10 +14,11 @@ type CreateApiTokenPayload = {
 
 export class OneApiAdapter extends BasePlatformAdapter {
   readonly platformName: string = 'one-api';
+  override readonly apiTokenCapabilities = { create: true, update: true, delete: true };
 
   private normalizeTokenKeyForCompare(value?: string | null): string {
     const trimmed = (value || '').trim();
-    return trimmed.startsWith('Bearer ') ? trimmed.slice(7).trim() : trimmed;
+    return trimmed.replace(/^Bearer\s+/i, '').replace(/^sk-/i, '');
   }
 
   private buildDefaultTokenPayload(options?: CreateApiTokenOptions): CreateApiTokenPayload {
@@ -242,5 +244,27 @@ export class OneApiAdapter extends BasePlatformAdapter {
     } catch {
       return false;
     }
+  }
+
+  override async updateApiToken(
+    baseUrl: string,
+    accessToken: string,
+    token: ApiTokenInfo,
+    options: UpdateApiTokenOptions,
+    _platformUserId?: number,
+  ): Promise<boolean> {
+    if (!this.apiTokenCapabilities.update) return false;
+    const headers = { Authorization: `Bearer ${accessToken}` };
+    const list = await this.fetchJson<any>(`${baseUrl}/api/token/?p=0&size=100`, { headers });
+    const items = Array.isArray(list?.data) ? list.data : list?.data?.items || list?.items || [];
+    const target = findUpstreamToken(items, token);
+    if (!target) return false;
+    const detail = await this.fetchJson<any>(`${baseUrl}/api/token/${target.id}`, { headers });
+    if (!detail?.success || Number(detail.data?.id) !== Number(target.id)) return false;
+    const result = await this.fetchJson<any>(`${baseUrl}/api/token/`, {
+      method: 'PUT', headers,
+      body: JSON.stringify({ ...detail.data, ...options }),
+    });
+    return result?.success === true;
   }
 }

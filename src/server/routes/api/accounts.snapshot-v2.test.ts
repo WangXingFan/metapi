@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import {
   formatLocalDate,
   formatUtcSqlDateTime,
@@ -56,6 +57,19 @@ describe("accounts snapshot v2", () => {
       process.env.DATA_DIR = previousDataDir;
     }
     rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it("reads current credentials directly from the account instead of a cached snapshot", async () => {
+    const site = await db.insert(schema.sites).values({ name: "credentials", url: "https://credentials.example", platform: "new-api" }).returning().get();
+    const account = await db.insert(schema.accounts).values({ siteId: site.id, accessToken: "old-session" }).returning().get();
+    await app.inject({ method: "GET", url: "/api/accounts" });
+    await db.update(schema.accounts).set({ accessToken: "current-session", apiToken: "sk-current-key", extraConfig: JSON.stringify({ platformUserId: 7788 }) }).where(eq(schema.accounts.id, account.id)).run();
+    const response = await app.inject({ method: "GET", url: `/api/accounts/${account.id}/credentials` });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toEqual({ id: account.id, accessToken: "current-session", apiToken: "sk-current-key", platformUserId: 7788 });
+    expect((await app.inject({ method: "GET", url: "/api/accounts/0/credentials" })).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: "/api/accounts/999999/credentials" })).statusCode).toBe(404);
   });
 
   it("returns accounts and sites in one snapshot payload", async () => {

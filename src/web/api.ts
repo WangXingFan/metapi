@@ -789,6 +789,12 @@ export const api = {
     request(`/api/sites/${siteId}/available-models`),
 
   // Accounts
+  getAccountCredentials: (id: number) => request(`/api/accounts/${id}/credentials`) as Promise<{
+    id: number;
+    accessToken: string;
+    apiToken: string | null;
+    platformUserId: number | null;
+  }>,
   getAccounts: async (params?: { includeOauth?: boolean }) => {
     const result = await request<any>(`/api/accounts${buildQueryString(params)}`);
     return Array.isArray(result?.accounts) ? result.accounts : result;
