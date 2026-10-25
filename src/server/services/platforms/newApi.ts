@@ -4,7 +4,7 @@ import { createContext, runInContext } from 'node:vm';
 import { withSiteProxyRequestInit } from '../siteProxy.js';
 import { fetchJsonWithShieldCookieRetry } from './newApiShield.js';
 import type { UpdateApiTokenOptions } from './base.js';
-import { findUpstreamToken } from './tokenManagement.js';
+import { findUpstreamToken, parseTokenGroupNames, resolveTokenGroupErrorMessage } from './tokenManagement.js';
 
 export class NewApiAdapter extends BasePlatformAdapter {
   readonly platformName: string = 'new-api';
@@ -269,43 +269,6 @@ export class NewApiAdapter extends BasePlatformAdapter {
   private normalizeTokenKeyForCompare(value?: string | null): string {
     const trimmed = (value || '').trim();
     return trimmed.replace(/^Bearer\s+/i, '').replace(/^sk-/i, '');
-  }
-
-  private parseGroupKeys(payload: any): string[] {
-    if (payload && typeof payload === 'object' && payload?.success === false) {
-      return [];
-    }
-
-    const source = payload?.data ?? payload;
-    if (Array.isArray(source)) {
-      return source
-        .map((item) => String(item || '').trim())
-        .filter(Boolean);
-    }
-
-    if (source && typeof source === 'object') {
-      return Object.keys(source)
-        .map((key) => key.trim())
-        .filter((key) => !['success', 'message', 'code', 'data', 'error'].includes(key.toLowerCase()))
-        .filter(Boolean);
-    }
-
-    return [];
-  }
-
-  private resolveGroupFetchErrorMessage(payload: any): string {
-    const message = typeof payload?.message === 'string' ? payload.message.trim() : '';
-    const normalized = message.toLowerCase();
-    const indicatesExpired = normalized.includes('expired')
-      || normalized.includes('invalid token')
-      || normalized.includes('access token')
-      || normalized.includes('unauthorized')
-      || normalized.includes('forbidden')
-      || normalized.includes('未登录')
-      || normalized.includes('登录')
-      || normalized.includes('过期');
-    if (indicatesExpired) return '账号会话可能已过期，请重新登录后再拉取分组';
-    return message || '拉取分组失败';
   }
 
   private normalizeTokenItems(items: any[]): ApiTokenInfo[] {
@@ -1351,60 +1314,39 @@ export class NewApiAdapter extends BasePlatformAdapter {
 
   async getUserGroups(baseUrl: string, accessToken: string, platformUserId?: number): Promise<string[]> {
     const resolvedUserId = platformUserId || await this.discoverUserId(baseUrl, accessToken);
-    const dedupe = (groups: string[]) => Array.from(new Set(groups.map((item) => item.trim()).filter(Boolean)));
+    const endpoints = ['/api/user/self/groups', '/api/user_group_map', '/api/user/groups'];
     let terminalError: string | null = null;
-
-    try {
-      const res = await this.fetchJson<any>(`${baseUrl}/api/user/self/groups`, {
-        headers: this.authHeaders(accessToken, resolvedUserId || undefined),
-      });
-      if (res?.success === false) {
-        terminalError = this.resolveGroupFetchErrorMessage(res);
+    const fetchGroups = async (request: (path: string) => Promise<any>): Promise<string[]> => {
+      for (const path of endpoints) {
+        try {
+          const response = await request(path);
+          if (response?.success === false || response?.error) {
+            terminalError ||= resolveTokenGroupErrorMessage(response);
+          }
+          const groups = parseTokenGroupNames(response);
+          if (groups.length > 0) return groups;
+        } catch (error) {
+          // Keep authentication failures visible instead of inventing a default group.
+          if (!(error instanceof Error) || !/HTTP 404\b/.test(error.message)) {
+            terminalError ||= resolveTokenGroupErrorMessage(error);
+          }
+        }
       }
-      const parsed = dedupe(this.parseGroupKeys(res));
-      if (parsed.length > 0) return parsed;
-    } catch {}
-
-    try {
-      const res = await this.fetchJson<any>(`${baseUrl}/api/user_group_map`, {
-        headers: this.authHeaders(accessToken, resolvedUserId || undefined),
-      });
-      if (res?.success === false) {
-        terminalError = this.resolveGroupFetchErrorMessage(res);
-      }
-      const parsed = dedupe(this.parseGroupKeys(res));
-      if (parsed.length > 0) return parsed;
-    } catch {}
+      return [];
+    };
+    const bearerGroups = await fetchGroups((path) => this.fetchJson<any>(`${baseUrl}${path}`, {
+      headers: this.authHeaders(accessToken, resolvedUserId || undefined),
+    }));
+    if (bearerGroups.length > 0) return bearerGroups;
 
     const cookieUserId = resolvedUserId || await this.probeUserIdByCookie(baseUrl, accessToken);
     for (const cookie of this.buildCookieCandidates(accessToken)) {
-      const headers: Record<string, string> = { Cookie: cookie };
-      if (cookieUserId) headers['New-Api-User'] = String(cookieUserId);
-
-      try {
-        const res = await this.fetchJsonRaw<any>(`${baseUrl}/api/user/self/groups`, { headers });
-        if (res?.success === false) {
-          terminalError = this.resolveGroupFetchErrorMessage(res);
-        }
-        const parsed = dedupe(this.parseGroupKeys(res));
-        if (parsed.length > 0) return parsed;
-      } catch {}
-
-      try {
-        const res = await this.fetchJsonRaw<any>(`${baseUrl}/api/user_group_map`, { headers });
-        if (res?.success === false) {
-          terminalError = this.resolveGroupFetchErrorMessage(res);
-        }
-        const parsed = dedupe(this.parseGroupKeys(res));
-        if (parsed.length > 0) return parsed;
-      } catch {}
+      const headers = { ...this.authHeaders(accessToken, cookieUserId || undefined), Cookie: cookie };
+      delete (headers as Record<string, string>).Authorization;
+      const groups = await fetchGroups((path) => this.fetchJsonRaw<any>(`${baseUrl}${path}`, { headers }));
+      if (groups.length > 0) return groups;
     }
-
-    if (terminalError) {
-      throw new Error(terminalError);
-    }
-
-    return ['default'];
+    throw new Error(terminalError || '上游未返回可用分组，请检查账户会话后重试');
   }
 
   async deleteApiToken(

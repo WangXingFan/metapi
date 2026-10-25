@@ -57,6 +57,7 @@ describe('LiteKeys', () => {
     let root!: ReactTestRenderer;
     const button = (label: string) => root.root.find((node) => node.type === 'button' && collectText(node).trim() === label);
     const input = (label: string) => root.root.find((node) => node.type === 'input' && node.props['aria-label'] === label);
+    const groupSelect = () => root.root.find((node) => node.type === 'select' && node.props['aria-label'] === '分组');
     try {
       await act(async () => {
         root = create(<MemoryRouter initialEntries={['/keys?accountId=101']}><ToastProvider><LiteKeys /></ToastProvider></MemoryRouter>);
@@ -65,9 +66,10 @@ describe('LiteKeys', () => {
       await act(async () => { button('新建 Key').props.onClick(); });
       await flushMicrotasks();
       expect(apiMock.getAccountTokenGroups).toHaveBeenCalledWith(101);
+      expect(groupSelect().findAllByType('option').map((option) => option.props.value)).toEqual(['', 'cckcc', 'cckpro']);
       await act(async () => {
         input('Key 名称').props.onChange({ target: { value: 'new-key' } });
-        input('分组').props.onChange({ target: { value: 'cckpro' } });
+        groupSelect().props.onChange({ target: { value: 'cckpro' } });
       });
       await act(async () => { button('在上游创建').props.onClick(); });
       await flushMicrotasks();
@@ -76,8 +78,14 @@ describe('LiteKeys', () => {
 
       await act(async () => { button('编辑 / 分组').props.onClick(); });
       await flushMicrotasks();
-      expect(input('分组').props.value).toBe('cckcc');
-      await act(async () => { input('分组').props.onChange({ target: { value: 'cckpro' } }); });
+      expect(groupSelect().props.value).toBe('cckcc');
+      expect(groupSelect().findAllByType('option').map((option) => option.props.value)).toEqual(['', 'cckcc', 'cckpro']);
+      apiMock.getAccountTokenGroups.mockResolvedValueOnce({ groups: ['cckcc', 'cckpro', 'new-upstream-group'], capabilities: { create: true, update: true } });
+      await act(async () => { button('刷新分组').props.onClick(); });
+      await flushMicrotasks();
+      expect(groupSelect().props.value).toBe('cckcc');
+      expect(groupSelect().findAllByType('option').map((option) => option.props.value)).toContain('new-upstream-group');
+      await act(async () => { groupSelect().props.onChange({ target: { value: 'cckpro' } }); });
       await act(async () => { button('保存并同步上游').props.onClick(); });
       await flushMicrotasks();
       expect(apiMock.updateAccountToken).toHaveBeenCalledWith(1, { name: 'key', group: 'cckpro', syncUpstream: true });

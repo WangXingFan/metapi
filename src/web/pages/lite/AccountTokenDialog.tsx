@@ -41,13 +41,17 @@ export default function AccountTokenDialog({ mode, token, accounts, initialAccou
     let active = true;
     setLoadingGroups(true);
     setGroupError('');
+    setGroups([]);
     setCapabilities({ create: false, update: false });
     void api.getAccountTokenGroups(accountId).then((result) => {
       if (!active) return;
-      const available: string[] = Array.isArray(result?.groups) ? result.groups : [];
+      const available: string[] = Array.isArray(result?.groups)
+        ? result.groups.filter((value: unknown): value is string => typeof value === 'string' && !!value.trim())
+        : [];
       setGroups(available);
       setCapabilities(result?.capabilities || { create: false, update: false });
-      if (mode === 'create') setGroup(available.includes('default') ? 'default' : available[0] || '');
+      if (mode === 'create') setGroup((current) => available.includes(current)
+        ? current : available.includes('default') ? 'default' : available[0] || '');
     }).catch((error: any) => {
       if (active) setGroupError(error?.message || '加载上游分组失败');
     }).finally(() => {
@@ -63,7 +67,7 @@ export default function AccountTokenDialog({ mode, token, accounts, initialAccou
     if (completing && !fullKey) return toast.error('请粘贴完整明文 key');
     if (fullKey && /[*•]/.test(fullKey)) return toast.error('请填写完整 key，不能使用脱敏值');
     if (!completing && !name.trim()) return toast.error('请填写 Key 名称');
-    if (!completing && !group.trim()) return toast.error('请选择或填写分组');
+    if (!completing && !group.trim()) return toast.error('请选择上游分组');
     setSaving(true);
     try {
       if (mode === 'create') {
@@ -122,13 +126,23 @@ export default function AccountTokenDialog({ mode, token, accounts, initialAccou
               <div style={fieldLabelStyle}>Key 名称</div>
               <input aria-label="Key 名称" value={name} onChange={(event) => setName(event.target.value)} style={inputStyle} disabled={saving} autoFocus />
             </label>
-            <label>
-              <div style={fieldLabelStyle}>分组</div>
-              <input aria-label="分组" value={group} onChange={(event) => setGroup(event.target.value)} list="account-key-groups" placeholder={loadingGroups ? '正在加载上游分组...' : '选择或填写分组'} style={inputStyle} disabled={saving || loadingGroups} />
-              <datalist id="account-key-groups">
-                {Array.from(new Set([token?.tokenGroup || '', ...groups])).filter(Boolean).map((item) => <option key={item} value={item} />)}
-              </datalist>
-            </label>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <label htmlFor="account-key-group" style={fieldLabelStyle}>分组</label>
+                <button type="button" className="btn btn-link" onClick={() => setReload((value) => value + 1)} disabled={saving || loadingGroups}>
+                  {loadingGroups ? '加载中...' : '刷新分组'}
+                </button>
+              </div>
+              <select id="account-key-group" aria-label="分组" value={group} onChange={(event) => setGroup(event.target.value)} style={inputStyle} disabled={saving || loadingGroups}>
+                <option value="" disabled>{loadingGroups ? '正在加载上游分组...' : '请选择上游分组'}</option>
+                {Array.from(new Set([...groups, token?.tokenGroup || ''])).filter(Boolean).map((item) => (
+                  <option key={item} value={item}>{item}{!groups.includes(item) ? '（当前分组，上游未返回）' : ''}</option>
+                ))}
+              </select>
+              {!loadingGroups && !groupError && groups.length === 0 ? (
+                <div className="alert alert-warning" style={{ marginTop: 8 }}>上游未返回可用分组，请刷新或检查账户会话。</div>
+              ) : null}
+            </div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
               {mode === 'create' ? '将在上游网站创建 Key，并自动读取和保存完整值。' : '名称和分组会同时更新到上游网站。'}
             </div>

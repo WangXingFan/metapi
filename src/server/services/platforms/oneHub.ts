@@ -1,4 +1,5 @@
 import { OneApiAdapter } from './oneApi.js';
+import { parseTokenGroupNames } from './tokenManagement.js';
 
 export class OneHubAdapter extends OneApiAdapter {
   readonly platformName: string = 'one-hub';
@@ -43,11 +44,8 @@ export class OneHubAdapter extends OneApiAdapter {
       const res = await this.fetchJson<any>(`${baseUrl}/api/user_group_map`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-      const source = res?.data || res;
-      if (source && typeof source === 'object' && !Array.isArray(source)) {
-        const groups = Object.keys(source).map((k) => k.trim()).filter(Boolean);
-        if (groups.length > 0) return Array.from(new Set(groups));
-      }
+      const groups = parseTokenGroupNames(res);
+      if (groups.length > 0) return groups;
     } catch {}
 
     return super.getUserGroups(baseUrl, accessToken);

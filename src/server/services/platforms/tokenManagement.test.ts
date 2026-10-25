@@ -18,6 +18,8 @@ describe('upstream token management', () => {
   let extraToken: boolean;
   let batchReveals: number;
   let singleReveals: number;
+  let groupResponse: unknown;
+  let groupEndpoint: string;
   const fullKey = 'sk-abc-complete-value-1234';
   const detail = {
     id: 7, name: 'original', group: 'cckcc', key: fullKey, status: 1,
@@ -35,6 +37,8 @@ describe('upstream token management', () => {
     extraToken = false;
     batchReveals = 0;
     singleReveals = 0;
+    groupResponse = { success: true, data: { cckcc: { ratio: 1 }, cckpro: { ratio: 2 } } };
+    groupEndpoint = '/api/user/groups';
     server = createServer(async (req, res) => {
       res.setHeader('Content-Type', 'application/json');
       if (cookieOnly && !req.headers.cookie?.includes('session=')) {
@@ -42,7 +46,9 @@ describe('upstream token management', () => {
         res.end(JSON.stringify({ success: false }));
         return;
       }
-      if (req.url?.startsWith('/api/token/?')) {
+      if (req.url === groupEndpoint) {
+        res.end(JSON.stringify(groupResponse));
+      } else if (req.url?.startsWith('/api/token/?')) {
         const items = [{ ...detail, key: masked ? 'abc***1234' : fullKey }];
         if (extraToken) items.push({ ...detail, id: 8, name: 'another', key: 'def***5678' });
         res.end(JSON.stringify({ success: true, data: { items } }));
@@ -146,5 +152,33 @@ describe('upstream token management', () => {
   it('does not treat a completely masked key as an identity match', () => {
     expect(tokenKeysMatch('sk-***', fullKey)).toBe(false);
     expect(tokenKeysMatch('abc***1234', fullKey)).toBe(true);
+  });
+
+  it.each(['new-api', 'one-api', 'one-hub'])('fetches all %s groups from the user/groups fallback', async (platform) => {
+    const adapter = platform === 'new-api' ? new NewApiAdapter() : platform === 'one-api' ? new OneApiAdapter() : new OneHubAdapter();
+    expect(await adapter.getUserGroups(baseUrl, 'session', 42)).toEqual(['cckcc', 'cckpro']);
+  });
+
+  it.each([
+    { success: true, data: ['cckcc', 'cckpro'] },
+    { success: true, data: [{ name: 'cckcc' }, { group_name: 'cckpro' }] },
+    { success: true, data: { groups: { cckcc: 1, cckpro: 2 } } },
+    { success: true, data: { items: [{ value: 'cckcc' }, { value: 'cckpro' }] } },
+  ])('parses upstream group lists without turning objects or array indexes into names (%j)', async (payload) => {
+    groupResponse = payload;
+    expect(await new NewApiAdapter().getUserGroups(baseUrl, 'session', 42)).toEqual(['cckcc', 'cckpro']);
+    expect(await new OneApiAdapter().getUserGroups(baseUrl, 'session')).toEqual(['cckcc', 'cckpro']);
+  });
+
+  it('loads groups through cookie sessions and compatibility user-id headers', async () => {
+    cookieOnly = true;
+    groupEndpoint = '/api/user/self/groups';
+    expect(await new NewApiAdapter().getUserGroups(baseUrl, 'session', 42)).toEqual(['cckcc', 'cckpro']);
+  });
+
+  it('reports upstream errors instead of returning a fabricated default group', async () => {
+    groupResponse = { success: false, message: 'access token expired', data: { default: 1 } };
+    await expect(new NewApiAdapter().getUserGroups(baseUrl, 'session', 42)).rejects.toThrow('账号会话可能已过期');
+    await expect(new OneApiAdapter().getUserGroups(baseUrl, 'session')).rejects.toThrow('账号会话可能已过期');
   });
 });
