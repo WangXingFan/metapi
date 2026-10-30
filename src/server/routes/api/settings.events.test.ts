@@ -112,6 +112,29 @@ describe('settings and auth events', () => {
     expect(events[0].message || '').toContain('签到 Cron');
   });
 
+  it('ignores the obsolete model availability probe flag from older clients', async () => {
+    const updateResponse = await app.inject({
+      method: 'PUT',
+      url: '/api/settings/runtime',
+      payload: { modelAvailabilityProbeEnabled: true },
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.json()).not.toHaveProperty('modelAvailabilityProbeEnabled');
+    expect(config).not.toHaveProperty('modelAvailabilityProbeEnabled');
+    const saved = await db.select().from(schema.settings)
+      .where(eq(schema.settings.key, 'model_availability_probe_enabled')).get();
+    expect(saved).toBeUndefined();
+    expect(await db.select().from(schema.events).all()).toEqual([]);
+
+    const getResponse = await app.inject({
+      method: 'GET',
+      url: '/api/settings/runtime',
+    });
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json()).not.toHaveProperty('modelAvailabilityProbeEnabled');
+  });
+
   it('persists and returns checkin interval mode from runtime settings', async () => {
     const updateResponse = await app.inject({
       method: 'PUT',

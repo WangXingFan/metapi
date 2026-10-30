@@ -35,6 +35,14 @@ describe('applyRuntimeSettings', () => {
     expect(config.globalAllowedModels).toEqual(['gpt-5.4', 'claude-3.7-sonnet']);
   });
 
+  it('ignores persisted model availability probe settings from older versions', () => {
+    applyRuntimeSettings(new Map([
+      ['model_availability_probe_enabled', JSON.stringify(true)],
+    ]));
+
+    expect(config).not.toHaveProperty('modelAvailabilityProbeEnabled');
+  });
+
   it('normalizes smtpPort to a positive integer during hydration', () => {
     config.smtpPort = 587;
 

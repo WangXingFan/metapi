@@ -13,6 +13,20 @@ describe('buildConfig', () => {
     expect(config.checkinCron).toBe('0 8 * * *');
   });
 
+  it('ignores obsolete model availability probe environment variables', () => {
+    const config = buildConfig({
+      MODEL_AVAILABILITY_PROBE_ENABLED: 'true',
+      MODEL_AVAILABILITY_PROBE_INTERVAL_MS: '60000',
+      MODEL_AVAILABILITY_PROBE_TIMEOUT_MS: '3000',
+      MODEL_AVAILABILITY_PROBE_CONCURRENCY: '16',
+    });
+
+    expect(config).not.toHaveProperty('modelAvailabilityProbeEnabled');
+    expect(config).not.toHaveProperty('modelAvailabilityProbeIntervalMs');
+    expect(config).not.toHaveProperty('modelAvailabilityProbeTimeoutMs');
+    expect(config).not.toHaveProperty('modelAvailabilityProbeConcurrency');
+  });
+
   it('aligns desktop deployments with server deployments for listen host', () => {
     const config = buildConfig({
       HOST: '0.0.0.0',

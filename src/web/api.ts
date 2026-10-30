@@ -364,7 +364,6 @@ export type RuntimeSettingsPayload = {
   proxyToken?: string;
   systemProxyUrl?: string;
   payloadRules?: Record<string, unknown> | null;
-  modelAvailabilityProbeEnabled?: boolean;
   codexUpstreamWebsocketEnabled?: boolean;
   responsesCompactFallbackToResponsesEnabled?: boolean;
   disableCrossProtocolFallback?: boolean;
