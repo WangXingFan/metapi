@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api.js";
+import AccountCredentialsDialog from "./lite/AccountCredentialsDialog.js";
+import AccountCheckinSettingsDialog from "./lite/AccountCheckinSettingsDialog.js";
 import CenteredModal from "../components/CenteredModal.js";
 import {
   ColumnVisibilityControl,
@@ -15,10 +17,8 @@ import { useConfirm } from "../components/ConfirmDialog.js";
 import RowActions from "../components/RowActions.js";
 import { formatDateTimeLocal } from "./helpers/checkinLogTime.js";
 import {
-  copyText,
   fieldLabelStyle,
   inputStyle,
-  maskSecret,
   monoTextStyle,
   parsePositiveInt,
 } from "./lite/shared.js";
@@ -60,22 +60,6 @@ type AccountItem = {
 
 type CreateMode = "login" | "credential";
 type CredentialMode = "session" | "apikey";
-
-const CHECKIN_SPREAD_INTERVAL_OPTIONS = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60].map((minute) => ({
-  value: String(minute),
-  label: `${minute} 分钟`,
-}));
-
-function normalizeCheckinSpreadIntervalMinutes(input: unknown): number {
-  const minute = Number(input);
-  if (!Number.isFinite(minute)) return 5;
-  const normalized = Math.min(240, Math.max(1, Math.trunc(minute)));
-  const option = CHECKIN_SPREAD_INTERVAL_OPTIONS.find((item) => Number(item.value) === normalized);
-  return option ? normalized : 5;
-}
-
-const CHECKIN_START_TIME = "08:00";
-const CHECKIN_START_CRON = "0 8 * * *";
 
 type LoginForm = {
   siteId: number;
@@ -188,46 +172,6 @@ function resolvePlatformUserId(account: AccountItem): string {
   return normalizePositiveId(account.platformUserId) || normalizePositiveId(parseExtraConfig(account.extraConfig).platformUserId);
 }
 
-type CredentialField = {
-  key: string;
-  label: string;
-  value: string;
-  sensitive?: boolean;
-};
-
-function buildCredentialFields(account: AccountItem): CredentialField[] {
-  const fields: CredentialField[] = [
-    {
-      key: "account-id",
-      label: "Metapi 账户 ID",
-      value: String(account.id),
-    },
-    {
-      key: "platform-user-id",
-      label: "平台用户 ID",
-      value: resolvePlatformUserId(account),
-    },
-    {
-      key: "access-token",
-      label: "Access Token / Session",
-      value: String(account.accessToken || "").trim(),
-      sensitive: true,
-    },
-  ];
-
-  const apiToken = String(account.apiToken || "").trim();
-  if (apiToken) {
-    fields.push({
-      key: "api-token",
-      label: "API Key",
-      value: apiToken,
-      sensitive: true,
-    });
-  }
-
-  return fields;
-}
-
 function formatAccountBalance(value: unknown): string {
   const balance = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(balance)) return "-";
@@ -326,9 +270,6 @@ export default function LiteAccounts() {
   const [siteFilter, setSiteFilter] = useState<number>(0);
   const [search, setSearch] = useState("");
   const [checkinSettingsOpen, setCheckinSettingsOpen] = useState(false);
-  const [checkinSettingsLoading, setCheckinSettingsLoading] = useState(false);
-  const [checkinSettingsSaving, setCheckinSettingsSaving] = useState(false);
-  const [checkinSpreadIntervalMinutes, setCheckinSpreadIntervalMinutes] = useState(5);
   const [rebindAccount, setRebindAccount] = useState<AccountItem | null>(null);
   const [rebindForm, setRebindForm] = useState<RebindForm>({
     accessToken: "",
@@ -336,26 +277,6 @@ export default function LiteAccounts() {
   });
   const [rebinding, setRebinding] = useState(false);
   const [credentialAccount, setCredentialAccount] = useState<AccountItem | null>(null);
-  const [credentialsRevealed, setCredentialsRevealed] = useState(false);
-  const [credentialsLoading, setCredentialsLoading] = useState(false);
-  const [credentialsError, setCredentialsError] = useState("");
-  const credentialAccountId = credentialAccount?.id;
-
-  useEffect(() => {
-    if (!credentialAccountId) return;
-    let active = true;
-    setCredentialsLoading(true);
-    setCredentialsError("");
-    void api.getAccountCredentials(credentialAccountId).then((credentials) => {
-      if (active) setCredentialAccount((current) => current?.id === credentialAccountId ? { ...current, ...credentials } : current);
-    }).catch((error: any) => {
-      if (active) setCredentialsError(error?.message || "读取账户凭据失败");
-    }).finally(() => {
-      if (active) setCredentialsLoading(false);
-    });
-    return () => { active = false; };
-  }, [credentialAccountId]);
-
   const requestedSiteId = useMemo(
     () => parsePositiveInt(new URLSearchParams(location.search).get("siteId")),
     [location.search],
@@ -503,29 +424,8 @@ export default function LiteAccounts() {
     setRebinding(false);
   };
 
-  const openCredentials = (account: AccountItem) => {
-    setCredentialAccount(account);
-    setCredentialsRevealed(false);
-  };
-
-  const closeCredentials = () => {
-    setCredentialAccount(null);
-    setCredentialsRevealed(false);
-  };
-
-  const copyCredential = async (label: string, value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      toast.info(`${label} 为空`);
-      return;
-    }
-    try {
-      await copyText(trimmed);
-      toast.success(`已复制 ${label}`);
-    } catch (error: any) {
-      toast.error(error?.message || "复制失败");
-    }
-  };
+  const openCredentials = (account: AccountItem) => setCredentialAccount(account);
+  const closeCredentials = () => setCredentialAccount(null);
 
   const saveRebind = async () => {
     if (!rebindAccount) return;
@@ -563,45 +463,7 @@ export default function LiteAccounts() {
     }
   };
 
-  const openCheckinSettings = async () => {
-    setCheckinSettingsOpen(true);
-    setCheckinSettingsLoading(true);
-    try {
-      const runtimeInfo = await api.getRuntimeSettings();
-      setCheckinSpreadIntervalMinutes(
-        normalizeCheckinSpreadIntervalMinutes(runtimeInfo?.checkinSpreadIntervalMinutes),
-      );
-    } catch (error: any) {
-      toast.error(error?.message || "加载签到设置失败");
-    } finally {
-      setCheckinSettingsLoading(false);
-    }
-  };
-
-  const closeCheckinSettings = () => {
-    setCheckinSettingsOpen(false);
-    setCheckinSettingsLoading(false);
-    setCheckinSettingsSaving(false);
-  };
-
-  const saveCheckinSettings = async () => {
-    const intervalMinutes = normalizeCheckinSpreadIntervalMinutes(checkinSpreadIntervalMinutes);
-    setCheckinSettingsSaving(true);
-    try {
-      await api.updateRuntimeSettings({
-        checkinCron: CHECKIN_START_CRON,
-        checkinScheduleMode: "spread",
-        checkinSpreadIntervalMinutes: intervalMinutes,
-      });
-      setCheckinSpreadIntervalMinutes(intervalMinutes);
-      toast.success(`已设置为每天 ${CHECKIN_START_TIME} 开始，每 ${intervalMinutes} 分钟签到 1 个账号`);
-      closeCheckinSettings();
-    } catch (error: any) {
-      toast.error(error?.message || "保存签到设置失败");
-    } finally {
-      setCheckinSettingsSaving(false);
-    }
-  };
+  const openCheckinSettings = () => setCheckinSettingsOpen(true);
 
   const saveByLogin = async () => {
     if (!loginForm.siteId || !loginForm.username.trim() || !loginForm.password.trim()) {
@@ -1115,162 +977,9 @@ export default function LiteAccounts() {
         )}
       </div>
 
-      <CenteredModal
-        open={checkinSettingsOpen}
-        onClose={closeCheckinSettings}
-        title="签到设置"
-        maxWidth={520}
-        closeOnBackdrop
-        closeOnEscape
-        bodyStyle={{ display: "grid", gap: 14 }}
-        footer={(
-          <>
-            <button type="button" className="btn btn-ghost" onClick={closeCheckinSettings}>
-              取消
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => void saveCheckinSettings()}
-              disabled={checkinSettingsLoading || checkinSettingsSaving}
-            >
-              {checkinSettingsSaving ? "保存中..." : "保存设置"}
-            </button>
-          </>
-        )}
-      >
-        {checkinSettingsLoading ? (
-          <div style={{ display: "grid", gap: 10 }}>
-            <div className="skeleton" style={{ height: 16, width: 120 }} />
-            <div className="skeleton" style={{ height: 40 }} />
-          </div>
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            <label>
-              <div style={fieldLabelStyle}>每日开始时间</div>
-              <input value={CHECKIN_START_TIME} readOnly style={inputStyle} />
-            </label>
-            <label>
-              <div style={fieldLabelStyle}>单账号间隔</div>
-              <select
-                value={String(checkinSpreadIntervalMinutes)}
-                onChange={(event) =>
-                  setCheckinSpreadIntervalMinutes(
-                    normalizeCheckinSpreadIntervalMinutes(event.target.value),
-                  )
-                }
-                style={inputStyle}
-              >
-                {CHECKIN_SPREAD_INTERVAL_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
-      </CenteredModal>
+      {checkinSettingsOpen ? <AccountCheckinSettingsDialog onClose={() => setCheckinSettingsOpen(false)} /> : null}
 
-      {credentialAccount ? (
-        <CenteredModal
-          open
-          onClose={closeCredentials}
-          title="查看凭据"
-          maxWidth={680}
-          closeOnBackdrop
-          closeOnEscape
-          bodyStyle={{ display: "grid", gap: 14 }}
-          footer={(
-            <>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setCredentialsRevealed((current) => !current)}
-                disabled={credentialsLoading || !!credentialsError}
-              >
-                {credentialsRevealed ? "隐藏完整凭据" : "显示完整凭据"}
-              </button>
-              <button type="button" className="btn btn-primary" onClick={closeCredentials}>
-                关闭
-              </button>
-            </>
-          )}
-        >
-          <div style={{ display: "grid", gap: 14 }}>
-            <div
-              style={{
-                borderRadius: "var(--radius-sm)",
-                border: "1px solid var(--color-border)",
-                background: "var(--color-bg-card)",
-                padding: 12,
-                display: "grid",
-                gap: 4,
-              }}
-            >
-              <div style={{ fontWeight: 700 }}>{resolveAccountName(credentialAccount)}</div>
-              <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-                {credentialAccount.site?.name || "-"}
-              </div>
-            </div>
-            <div style={{ display: "grid", gap: 10 }}>
-              {credentialsLoading ? <div role="status">正在读取数据库中的凭据...</div> : credentialsError ? (
-                <div className="alert alert-warning" role="alert">{credentialsError}</div>
-              ) : buildCredentialFields(credentialAccount).map((field) => {
-                const hasValue = field.value.trim().length > 0;
-                const displayValue = !hasValue
-                  ? "-"
-                  : field.sensitive && !credentialsRevealed
-                    ? maskSecret(field.value)
-                    : field.value;
-                return (
-                  <div
-                    key={field.key}
-                    style={{
-                      border: "1px solid var(--color-border)",
-                      borderRadius: "var(--radius-sm)",
-                      padding: 12,
-                      display: "grid",
-                      gap: 8,
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 10,
-                        alignItems: "center",
-                      }}
-                    >
-                      <div style={fieldLabelStyle}>{field.label}</div>
-                      <button
-                        type="button"
-                        className="btn btn-link"
-                        onClick={() => void copyCredential(field.label, field.value)}
-                        disabled={!hasValue}
-                      >
-                        复制
-                      </button>
-                    </div>
-                    <div
-                      style={{
-                        ...monoTextStyle,
-                        borderRadius: "var(--radius-sm)",
-                        background: "var(--color-bg)",
-                        border: "1px solid var(--color-border)",
-                        padding: "10px 12px",
-                        minHeight: 38,
-                      }}
-                    >
-                      {displayValue}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </CenteredModal>
-      ) : null}
+      {credentialAccount ? <AccountCredentialsDialog key={credentialAccount.id} account={credentialAccount} onClose={closeCredentials} /> : null}
 
       {rebindAccount ? (
         <CenteredModal

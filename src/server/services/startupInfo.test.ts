@@ -27,5 +27,6 @@ describe('startupInfo', () => {
     expect(lines.some((line) => line.includes('/api/settings/auth/info'))).toBe(true);
     expect(lines.some((line) => line.includes('/v1/chat/completions'))).toBe(false);
     expect(lines.some((line) => line.includes('Proxy'))).toBe(false);
+    expect(lines.join('\n')).not.toContain('admin-token');
   });
 });

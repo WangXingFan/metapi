@@ -1,3 +1,4 @@
+import { buildDatabaseTlsOptions } from './tlsOptions.js';
 import Database from 'better-sqlite3';
 import mysql from 'mysql2/promise';
 import pg from 'pg';
@@ -323,7 +324,7 @@ async function resolveMySqlIndexPrefixRequirements(
 async function createPostgresClient(connectionString: string, ssl: boolean): Promise<RuntimeSchemaClient> {
   const clientOptions: pg.ClientConfig = { connectionString };
   if (ssl) {
-    clientOptions.ssl = { rejectUnauthorized: false };
+    clientOptions.ssl = buildDatabaseTlsOptions();
   }
   installPostgresJsonTextParsers();
   const client = new pg.Client(clientOptions);
@@ -350,7 +351,7 @@ async function createPostgresClient(connectionString: string, ssl: boolean): Pro
 async function createMySqlClient(connectionString: string, ssl: boolean): Promise<RuntimeSchemaClient> {
   const connectionOptions: mysql.ConnectionOptions = { uri: connectionString };
   if (ssl) {
-    connectionOptions.ssl = { rejectUnauthorized: false };
+    connectionOptions.ssl = buildDatabaseTlsOptions();
   }
   const connection = await mysql.createConnection(connectionOptions);
 

@@ -27,7 +27,7 @@ export function buildStartupEndpoints(input: StartupSummaryInput): StartupEndpoi
     baseUrl,
     adminDashboardUrl: baseUrl,
     adminApiExample,
-    adminApiCurl: `curl '${adminApiExample}' -H 'Authorization: Bearer ${input.authToken}'`,
+    adminApiCurl: `curl '${adminApiExample}' -H 'Authorization: Bearer <AUTH_TOKEN>'`,
   };
 }
 

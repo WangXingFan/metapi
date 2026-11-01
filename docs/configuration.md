@@ -9,6 +9,9 @@
 | `DATA_DIR` | SQLite、导出文件等运行数据目录 | `./data` |
 | `PORT` | 服务端监听端口 | `4000` |
 | `HOST` | 服务端监听地址 | `0.0.0.0` |
+| `TRUSTED_PROXIES` | 可信反向代理 IP/CIDR，逗号分隔；留空时忽略客户端转发头 | 空 |
+
+启用 IP 白名单或限流时，反向代理应覆写转发头，并通过 `TRUSTED_PROXIES` 指定可信代理地址。
 
 ## 数据库
 
@@ -17,6 +20,8 @@
 | `DB_TYPE` | `sqlite`、`mysql` 或 `postgres` |
 | `DB_URL` | 数据库连接字符串；SQLite 可留空使用默认数据目录 |
 | `DB_SSL` | Postgres/MySQL 是否启用 SSL |
+| `DB_SSL_CA_FILE` | 可选的数据库 CA 证书文件路径 |
+| `DB_SSL_REJECT_UNAUTHORIZED` | 默认验证证书；仅在明确接受风险时设置 `false` |
 
 变更数据库配置后应先备份，再执行迁移。
 
@@ -30,6 +35,9 @@
 | `CHECKIN_SPREAD_INTERVAL_MINUTES` | spread 模式单账号间隔分钟 | `5` |
 
 Lite 的“账户”页提供一个简化签到设置入口：每天 08:00 开始，按间隔逐个签到。
+
+余额默认每天 08:00 自动刷新一次（使用服务端时区），账户操作菜单可以随时手动刷新。
+`BALANCE_REFRESH_CRON` 默认值为 `0 8 * * *`，旧版每小时默认值会自动转换为每日一次。自动余额刷新不再触发模型发现或路由重建。
 
 ## 通知与代理相关变量
 

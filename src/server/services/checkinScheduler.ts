@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { db, schema } from '../db/index.js';
 import { refreshAllBalances } from './balanceService.js';
 import { checkinAll } from './checkinService.js';
-import * as routeRefreshWorkflow from './routeRefreshWorkflow.js';
+import { normalizeBalanceRefreshCron } from '../shared/balanceSchedule.js';
 import { sendNotification } from './notifyService.js';
 import { buildDailySummaryNotification, collectDailySummaryMetrics } from './dailySummaryService.js';
 import { cleanupConfiguredLogs } from './logCleanupService.js';
@@ -456,7 +456,6 @@ function createBalanceTask(cronExpr: string) {
     console.log(`[Scheduler] Refreshing balances at ${new Date().toISOString()}`);
     try {
       await refreshAllBalances();
-      await routeRefreshWorkflow.refreshModelsAndRebuildRoutes();
       console.log('[Scheduler] Balance refresh complete');
     } catch (err) {
       console.error('[Scheduler] Balance refresh error:', err);
@@ -519,7 +518,7 @@ export async function startScheduler() {
     'checkin_spread_interval_minutes',
     config.checkinSpreadIntervalMinutes,
   );
-  const activeBalanceCron = await resolveCronSetting('balance_refresh_cron', config.balanceRefreshCron);
+  const activeBalanceCron = normalizeBalanceRefreshCron(await resolveCronSetting('balance_refresh_cron', config.balanceRefreshCron));
   const activeDailySummaryCron = await resolveCronSetting('daily_summary_cron', DAILY_SUMMARY_DEFAULT_CRON);
   const activeLogCleanupCron = await resolveCronSetting('log_cleanup_cron', config.logCleanupCron || LOG_CLEANUP_DEFAULT_CRON);
   const activeLogCleanupUsageLogsEnabled = await resolveBooleanSetting(
@@ -606,9 +605,9 @@ export function updateCheckinSchedule(input: {
 
 export function updateBalanceRefreshCron(cronExpr: string) {
   if (!cron.validate(cronExpr)) throw new Error(`Invalid cron: ${cronExpr}`);
-  config.balanceRefreshCron = cronExpr;
+  config.balanceRefreshCron = normalizeBalanceRefreshCron(cronExpr);
   balanceTask?.stop();
-  balanceTask = createBalanceTask(cronExpr);
+  balanceTask = createBalanceTask(config.balanceRefreshCron);
 }
 
 export function updateLogCleanupSettings(input: {

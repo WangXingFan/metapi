@@ -4,6 +4,7 @@ import {
   syncTokensFromUpstream,
 } from './accountTokenService.js';
 import { refreshModelsForAccount, rebuildTokenRoutesFromAvailability } from './modelService.js';
+import { MODEL_DISCOVERY_DISABLED_REASON, ROUTE_REBUILD_DISABLED_REASON } from '../shared/liteCapabilities.js';
 
 type ModelRefreshResult = {
   accountId: number;
@@ -17,8 +18,6 @@ type DisabledRouteRebuildResult = {
   reason: string;
 };
 
-const MODEL_DISCOVERY_DISABLED_REASON = 'model discovery is disabled in Lite mode';
-const ROUTE_REBUILD_DISABLED_REASON = 'proxy routing is disabled in Lite mode';
 
 type UpstreamTokenLike = {
   name?: string | null;

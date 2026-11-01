@@ -496,6 +496,7 @@ export async function accountsRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { refresh?: string } }>(
     "/api/accounts",
     async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
       const snapshot = await getAccountsSnapshot({
         forceRefresh: parseBooleanFlag(request.query.refresh),
       });

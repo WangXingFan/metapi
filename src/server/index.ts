@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { eq } from 'drizzle-orm';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import {
@@ -13,7 +14,6 @@ import { authRoutes } from './routes/api/auth.js';
 import { accountTokensRoutes } from './routes/api/accountTokens.js';
 import { settingsRoutes } from './routes/api/settings.js';
 import { startScheduler } from './services/checkinScheduler.js';
-import * as routeRefreshWorkflow from './services/routeRefreshWorkflow.js';
 import { buildStartupSummaryLines } from './services/startupInfo.js';
 import { repairStoredCreatedAtValues } from './services/storedTimestampRepairService.js';
 import { migrateSiteApiKeysToAccounts } from './services/siteApiKeyMigrationService.js';
@@ -148,7 +148,8 @@ try {
   await ensureProxyLogBillingDetailsColumn();
   await repairStoredCreatedAtValues();
   await migrateSiteApiKeysToAccounts();
-  await routeRefreshWorkflow.rebuildRoutesOnly();
+  // Older snapshots contained account credentials; Lite now reads current DTOs.
+  await db.delete(schema.adminSnapshots).where(eq(schema.adminSnapshots.namespace, 'accounts-snapshot')).run();
 
   console.log('Loaded runtime settings overrides');
 } catch (error) {
@@ -185,11 +186,11 @@ if (existsSync(webDir)) {
     setHeaders: (res, filePath) => {
       const normalizedPath = normalize(filePath);
       if (normalizedPath.includes(`${sep}assets${sep}`)) {
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        res.header('Cache-Control', 'public, max-age=31536000, immutable');
         return;
       }
       if (normalizedPath.endsWith(`${sep}index.html`)) {
-        res.setHeader('Cache-Control', 'no-cache');
+        res.header('Cache-Control', 'no-cache');
       }
     },
   });

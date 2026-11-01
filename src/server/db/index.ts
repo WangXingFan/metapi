@@ -1,4 +1,6 @@
+import { buildDatabaseTlsOptions } from './tlsOptions.js';
 import Database from 'better-sqlite3';
+import { SqliteExecutionQueue } from './sqliteExecutionQueue.js';
 import mysql from 'mysql2/promise';
 import pg from 'pg';
 import { drizzle as drizzleSqliteProxy } from 'drizzle-orm/sqlite-proxy';
@@ -48,6 +50,7 @@ const TABLES_WITH_NUMERIC_ID = new Set([
 export let runtimeDbDialect: RuntimeDbDialect = config.dbType;
 
 let sqliteConnection: Database.Database | null = null;
+let sqliteExecution: SqliteExecutionQueue | null = null;
 let mysqlPool: mysql.Pool | null = null;
 let pgPool: pg.Pool | null = null;
 let proxyLogBillingDetailsColumnAvailable: boolean | null = null;
@@ -64,7 +67,7 @@ function buildMysqlPoolOptions(
     jsonStrings: true,
   };
   if (sslEnabled) {
-    poolOptions.ssl = { rejectUnauthorized: false };
+    poolOptions.ssl = buildDatabaseTlsOptions();
   }
   return poolOptions;
 }
@@ -75,7 +78,7 @@ function buildPostgresPoolOptions(
 ): pg.PoolConfig {
   const poolOptions: pg.PoolConfig = { connectionString };
   if (sslEnabled) {
-    poolOptions.ssl = { rejectUnauthorized: false };
+    poolOptions.ssl = buildDatabaseTlsOptions();
   }
   return poolOptions;
 }
@@ -1108,8 +1111,7 @@ function resetSchemaCapabilityCache() {
   proxyLogStreamTimingColumnsAvailable = null;
 }
 
-async function sqliteProxyQuery(sqlText: string, params: unknown[], method: SqlMethod) {
-  const sqlite = requireSqliteConnection();
+async function sqliteProxyQuery(sqlText: string, params: unknown[], method: SqlMethod, sqlite = requireSqliteConnection()) {
   const statement = sqlite.prepare(sqlText);
   if (method === 'run' || method === 'execute') {
     const result = statement.run(...params);
@@ -1370,11 +1372,14 @@ function initSqliteDb() {
   ensureProxyVideoTaskSchema();
   ensureProxyFileSchema();
 
+  const execution = new SqliteExecutionQueue();
+  sqliteExecution = execution;
   const rawDb = drizzleSqliteProxy(
-    (sqlText, params, method) => sqliteProxyQuery(sqlText, params, method as SqlMethod),
+    (sqlText, params, method) => execution.run(() => sqliteProxyQuery(sqlText, params, method as SqlMethod, sqlite)),
     { schema },
   ) as any;
-  return wrapDbClient(rawDb);
+  return wrapDbClient(rawDb, <R>(fn: (tx: any) => Promise<R> | R) =>
+    execution.run(() => rawDb.transaction((tx: object) => fn(wrapDbClient(tx)))) as Promise<R>);
 }
 
 type AppDb = ReturnType<typeof initSqliteDb>;
@@ -1471,8 +1476,11 @@ export async function closeDbConnections(): Promise<void> {
     pgPool = null;
   }
   if (sqliteConnection) {
-    sqliteConnection.close();
+    const connection = sqliteConnection;
+    if (sqliteExecution) await sqliteExecution.run(() => connection.close());
+    else connection.close();
     sqliteConnection = null;
+    sqliteExecution = null;
   }
 }
 

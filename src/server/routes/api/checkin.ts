@@ -1,8 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { config } from '../../config.js';
-import { db, schema } from '../../db/index.js';
 import { upsertSetting } from '../../db/upsertSetting.js';
-import { eq, desc } from 'drizzle-orm';
 import { checkinAccount } from '../../services/checkinService.js';
 import {
   CHECKIN_SPREAD_START_CRON,
@@ -13,7 +11,7 @@ import {
   updateCheckinSchedule,
 } from '../../services/checkinScheduler.js';
 import { startBackgroundTask } from '../../services/backgroundTaskService.js';
-import { classifyFailureReason } from '../../services/failureReasonService.js';
+import { listCheckinLogs, parseCheckinLogQuery } from '../../services/checkinLogService.js';
 
 export async function checkinRoutes(app: FastifyInstance) {
   // Start staggered check-in for eligible accounts.
@@ -102,33 +100,11 @@ export async function checkinRoutes(app: FastifyInstance) {
     return result;
   });
 
-  // Get check-in logs
-  app.get<{ Querystring: { limit?: string; offset?: string; accountId?: string } }>('/api/checkin/logs', async (request) => {
-    const limit = parseInt(request.query.limit || '50', 10);
-    const offset = parseInt(request.query.offset || '0', 10);
-    let query = db.select().from(schema.checkinLogs)
-      .innerJoin(schema.accounts, eq(schema.checkinLogs.accountId, schema.accounts.id))
-      .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
-      .orderBy(desc(schema.checkinLogs.createdAt))
-      .limit(limit)
-      .offset(offset);
-
-    if (request.query.accountId) {
-      query = query.where(eq(schema.checkinLogs.accountId, parseInt(request.query.accountId, 10))) as any;
-    }
-
-    const rows = await query.all();
-    return rows.map((row: any) => {
-      const source = row?.checkin_logs || row;
-      const failureReason = classifyFailureReason({
-        message: source?.message,
-        status: source?.status,
-      });
-      return {
-        ...row,
-        failureReason,
-      };
-    });
+  app.get('/api/checkin/logs', async (request, reply) => {
+    const parsed = parseCheckinLogQuery(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message || 'Invalid query' });
+    reply.header('Cache-Control', 'no-store');
+    return listCheckinLogs(parsed.data);
   });
 
   // Update check-in schedule

@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from "../shared/fetchWithTimeout.js";
 import { clearAuthSession, getAuthToken } from "./authSession.js";
 import type { AccountTokenGroup } from "../shared/accountTokenGroupTypes.js";
 
@@ -97,23 +98,6 @@ async function fetchAuthenticatedResponse(
     signal: externalSignal,
     ...fetchOptions
   } = options;
-  const controller = new AbortController();
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
-  let cleanupExternalSignal = () => {};
-
-  if (externalSignal) {
-    if (externalSignal.aborted) {
-      controller.abort();
-    } else {
-      const abortHandler = () => controller.abort();
-      externalSignal.addEventListener("abort", abortHandler, { once: true });
-      cleanupExternalSignal = () =>
-        externalSignal.removeEventListener("abort", abortHandler);
-    }
-  }
-
   const token = requireAuthToken();
   const headers = new Headers(fetchOptions.headers ?? {});
   headers.set("Authorization", `Bearer ${token}`);
@@ -122,12 +106,13 @@ async function fetchAuthenticatedResponse(
   }
 
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       ...fetchOptions,
-      signal: controller.signal,
+      signal: externalSignal,
       headers,
-    });
+    }, { timeoutMs, timeoutMessage: `请求超时（${Math.max(1, Math.round(timeoutMs / 1000))}s）` });
     if (res.status === 401 || res.status === 403) {
+      await res.body?.cancel();
       const hadToken = !!getAuthToken(localStorage);
       clearAuthSession(localStorage);
       if (
@@ -148,12 +133,6 @@ async function fetchAuthenticatedResponse(
       );
     }
     throw error;
-  } finally {
-    if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
-      timeoutHandle = null;
-    }
-    cleanupExternalSignal();
   }
 }
 

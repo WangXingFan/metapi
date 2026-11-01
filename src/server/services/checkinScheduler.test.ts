@@ -7,6 +7,11 @@ const scheduleMock = vi.fn(() => ({
 const validateMock = vi.fn(() => true);
 const selectRowsMock = vi.fn(() => []);
 const allMock = vi.fn();
+const balanceMock = vi.fn();
+
+vi.mock('./balanceService.js', () => ({
+  refreshAllBalances: (...args: unknown[]) => balanceMock(...args),
+}));
 
 vi.mock('node-cron', () => ({
   default: {
@@ -48,6 +53,15 @@ vi.mock('./checkinService.js', () => ({
 }));
 
 describe('checkinScheduler', () => {
+  it('upgrades the old hourly balance schedule and still executes a refresh', async () => {
+    const scheduler = await import('./checkinScheduler.js');
+    balanceMock.mockResolvedValue([]);
+    scheduler.updateBalanceRefreshCron('0 * * * *');
+    expect(scheduleMock).toHaveBeenCalledWith('0 8 * * *', expect.any(Function));
+    const callback = scheduleMock.mock.calls.at(-1)?.[1] as unknown as () => Promise<void>;
+    await callback();
+    expect(balanceMock).toHaveBeenCalledTimes(1);
+  });
   beforeEach(() => {
     vi.useFakeTimers();
     cronStopMock.mockReset();

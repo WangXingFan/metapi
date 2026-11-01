@@ -2,6 +2,7 @@ import 'dotenv/config';
 import type { FastifyServerOptions } from 'fastify';
 import { normalizePayloadRulesConfig } from './services/payloadRules.js';
 import { CHECKIN_SPREAD_START_CRON } from './shared/checkinSchedule.js';
+import { normalizeBalanceRefreshCron } from './shared/balanceSchedule.js';
 
 const DEFAULT_REQUEST_BODY_LIMIT = 20 * 1024 * 1024;
 const DEFAULT_CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -88,7 +89,7 @@ export function buildConfig(env: NodeJS.ProcessEnv) {
     checkinScheduleMode: parseCheckinScheduleMode(env.CHECKIN_SCHEDULE_MODE),
     checkinIntervalHours: Math.min(24, Math.max(1, Math.trunc(parseNumber(env.CHECKIN_INTERVAL_HOURS, 6)))),
     checkinSpreadIntervalMinutes: Math.min(240, Math.max(1, Math.trunc(parseNumber(env.CHECKIN_SPREAD_INTERVAL_MINUTES, 5)))),
-    balanceRefreshCron: env.BALANCE_REFRESH_CRON || '0 * * * *',
+    balanceRefreshCron: normalizeBalanceRefreshCron(env.BALANCE_REFRESH_CRON),
     logCleanupCron: env.LOG_CLEANUP_CRON || '0 6 * * *',
     logCleanupConfigured: false,
     logCleanupUsageLogsEnabled: parseBoolean(env.LOG_CLEANUP_USAGE_LOGS_ENABLED, false),
@@ -116,6 +117,7 @@ export function buildConfig(env: NodeJS.ProcessEnv) {
     smtpTo: env.SMTP_TO || '',
     notifyCooldownSec: Math.max(0, Math.trunc(parseNumber(env.NOTIFY_COOLDOWN_SEC, 300))),
     adminIpAllowlist: parseCsvList(env.ADMIN_IP_ALLOWLIST),
+    trustedProxies: parseCsvList(env.TRUSTED_PROXIES),
     port: Math.trunc(parseNumber(env.PORT, 4000)),
     listenHost: parseListenHost(env),
     dataDir,
@@ -179,7 +181,7 @@ export function buildFastifyOptions(
 ): FastifyServerOptions {
   return {
     logger: true,
-    trustProxy: true,
+    trustProxy: appConfig.trustedProxies.length > 0 ? appConfig.trustedProxies : false,
     bodyLimit: appConfig.requestBodyLimit,
   };
 }

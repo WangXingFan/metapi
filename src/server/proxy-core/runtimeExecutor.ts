@@ -1,8 +1,8 @@
-import { antigravityExecutor } from '../../proxy-core/executors/antigravityExecutor.js';
-import { claudeExecutor } from '../../proxy-core/executors/claudeExecutor.js';
-import { codexExecutor } from '../../proxy-core/executors/codexExecutor.js';
-import { geminiCliExecutor } from '../../proxy-core/executors/geminiCliExecutor.js';
-import type { RuntimeDispatchInput, RuntimeResponse } from '../../proxy-core/executors/types.js';
+import { antigravityExecutor } from './executors/antigravityExecutor.js';
+import { claudeExecutor } from './executors/claudeExecutor.js';
+import { codexExecutor } from './executors/codexExecutor.js';
+import { geminiCliExecutor } from './executors/geminiCliExecutor.js';
+import type { RuntimeDispatchInput, RuntimeResponse } from './executors/types.js';
 
 export async function dispatchRuntimeRequest(
   input: RuntimeDispatchInput,

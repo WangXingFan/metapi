@@ -72,6 +72,29 @@ describe("accounts snapshot v2", () => {
     expect((await app.inject({ method: "GET", url: "/api/accounts/999999/credentials" })).statusCode).toBe(404);
   });
 
+  it("returns safe current lists after updates and deletes with production caching behavior", async () => {
+    const previousVitest = process.env.VITEST;
+    delete process.env.VITEST;
+    try {
+      const site = await db.insert(schema.sites).values({ name: "safe-list", url: "https://safe.example", platform: "new-api", customHeaders: '{"Authorization":"site-secret"}' }).returning().get();
+      const account = await db.insert(schema.accounts).values({ siteId: site.id, accessToken: "session-secret", apiToken: "key-secret", extraConfig: '{"passwordCipher":"cipher-secret"}' }).returning().get();
+      const first = await app.inject({ method: "GET", url: "/api/accounts" });
+      expect(first.headers['cache-control']).toBe('no-store');
+      for (const secret of ['session-secret', 'key-secret', 'cipher-secret', 'site-secret']) expect(first.body).not.toContain(secret);
+      expect(first.json().accounts[0]).toMatchObject({ id: account.id, hasApiToken: true });
+      expect(first.json().accounts[0]).not.toHaveProperty('extraConfig');
+      const updated = await app.inject({ method: 'PUT', url: `/api/accounts/${account.id}`, payload: { status: 'disabled' } });
+      expect(updated.statusCode).toBe(200);
+      expect((await app.inject({ method: 'GET', url: '/api/accounts' })).json().accounts[0].status).toBe('disabled');
+      expect((await db.select().from(schema.adminSnapshots).all())).toHaveLength(0);
+      expect((await app.inject({ method: 'DELETE', url: `/api/accounts/${account.id}` })).statusCode).toBe(200);
+      expect((await app.inject({ method: 'GET', url: '/api/accounts' })).json().accounts).toEqual([]);
+    } finally {
+      if (previousVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = previousVitest;
+    }
+  });
+
   it("returns accounts and sites in one snapshot payload", async () => {
     const today = formatLocalDate(new Date());
     const site = await db

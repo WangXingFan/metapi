@@ -105,10 +105,10 @@ function createRules(): RuleSpec[] {
   return [
     {
       id: 'transformers-route-blind',
-      description: 'Transformers must not import route-layer proxy helpers',
+      description: 'Transformers must not depend on routes or runtime orchestration',
       fileFilter: (file) => file.startsWith('src/server/transformers/')
         && isNonTestSource(file),
-      lineMatch: (line) => /from\s+['"][^'"]*routes\/proxy\//.test(line),
+      lineMatch: (line) => /(?:from\s*|import\s*\()\s*['"](?:fastify|[^'"]*(?:routes\/|services\/(?:oauth\/|tokenRouter|runtimeDispatch)))/.test(line),
       message: 'transformer imports route-layer proxy code',
     },
     {
@@ -122,7 +122,7 @@ function createRules(): RuleSpec[] {
     {
       id: 'proxy-core-routes-proxy-import',
       description: 'Proxy-core imports from routes/proxy are tracked debt and should not grow',
-      fileFilter: (file) => file.startsWith('src/server/proxy-core/')
+      fileFilter: (file) => file.startsWith('src/server/') && !file.startsWith('src/server/routes/')
         && isNonTestSource(file),
       lineMatch: (line) => /from\s+['"][^'"]*routes\/proxy\//.test(line),
       message: 'proxy-core imports a helper from routes/proxy',

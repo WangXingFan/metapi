@@ -112,7 +112,7 @@ describe('db proxy query wrapper', () => {
     expect(testUtils.buildMysqlPoolOptions('mysql://root:pass@db.example.com:3306/metapi', true)).toMatchObject({
       uri: 'mysql://root:pass@db.example.com:3306/metapi',
       jsonStrings: true,
-      ssl: { rejectUnauthorized: false },
+      ssl: { rejectUnauthorized: true },
     });
   });
 
@@ -122,7 +122,7 @@ describe('db proxy query wrapper', () => {
     });
     expect(testUtils.buildPostgresPoolOptions('postgres://user:pass@db.example.com:5432/metapi', true)).toMatchObject({
       connectionString: 'postgres://user:pass@db.example.com:5432/metapi',
-      ssl: { rejectUnauthorized: false },
+      ssl: { rejectUnauthorized: true },
     });
   });
 

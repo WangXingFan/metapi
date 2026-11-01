@@ -11,6 +11,8 @@ describe('buildConfig', () => {
     expect(config.dataDir).toBe('./data');
     expect(config.checkinScheduleMode).toBe('spread');
     expect(config.checkinCron).toBe('0 8 * * *');
+    expect(config.balanceRefreshCron).toBe('0 8 * * *');
+    expect(buildConfig({ BALANCE_REFRESH_CRON: '0 * * * *' }).balanceRefreshCron).toBe('0 8 * * *');
   });
 
   it('ignores obsolete model availability probe environment variables', () => {
@@ -103,7 +105,7 @@ describe('buildConfig', () => {
   });
 
   it('trusts forwarded client IP headers for reverse-proxy deployments', async () => {
-    const app = Fastify(buildFastifyOptions(buildConfig({})));
+    const app = Fastify(buildFastifyOptions(buildConfig({ TRUSTED_PROXIES: '10.0.0.8' })));
 
     app.get('/ip', async (request) => ({
       ip: request.ip,

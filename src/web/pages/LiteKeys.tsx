@@ -27,7 +27,8 @@ type AccountItem = {
   username?: string | null;
   status?: string | null;
   credentialMode?: "session" | "apikey" | string;
-  apiToken?: string | null;
+  hasApiToken?: boolean;
+  apiTokenMasked?: string | null;
   oauthProvider?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -208,7 +209,7 @@ export default function LiteKeys() {
   const apiKeyAccounts = useMemo(
     () =>
       filteredAccounts.filter(
-        (account) => account.credentialMode === "apikey" && String(account.apiToken || "").trim(),
+        (account) => account.credentialMode === "apikey" && account.hasApiToken,
       ),
     [filteredAccounts],
   );
@@ -260,14 +261,11 @@ export default function LiteKeys() {
   };
 
   const copyDirectApiKey = async (account: AccountItem) => {
-    const value = String(account.apiToken || "").trim();
-    if (!value) {
-      toast.info("该账户没有可复制的 key");
-      return;
-    }
-
     setActionId(`copy-direct-${account.id}`);
     try {
+      const credentials = await api.getAccountCredentials(account.id);
+      const value = credentials.apiToken?.trim();
+      if (!value) throw new Error("该账户没有可复制的 key");
       await copyText(value);
       toast.success("已复制账户 key");
     } catch (error: any) {
@@ -659,7 +657,7 @@ export default function LiteKeys() {
                         <MobileField
                           label="Key"
                           stacked
-                          value={<span style={monoTextStyle}>{maskSecret(account.apiToken)}</span>}
+                          value={<span style={monoTextStyle}>{account.apiTokenMasked || "-"}</span>}
                         />
                         <MobileField label="更新时间" value={formatDateTimeLocal(account.updatedAt || account.createdAt)} />
                       </MobileCard>
@@ -691,7 +689,7 @@ export default function LiteKeys() {
                               {isDirectKeyColumnVisible("account") ? <td style={{ fontWeight: 600 }}>{resolveAccountName(account)}</td> : null}
                               {isDirectKeyColumnVisible("key") ? (
                                 <td>
-                                  <span style={monoTextStyle}>{maskSecret(account.apiToken)}</span>
+                                  <span style={monoTextStyle}>{account.apiTokenMasked || "-"}</span>
                                 </td>
                               ) : null}
                               {isDirectKeyColumnVisible("updatedAt") ? (

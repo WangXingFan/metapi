@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from '../../shared/fetchWithTimeout.js';
 import { asc, eq } from 'drizzle-orm';
 import cron from 'node-cron';
 import { db, schema } from '../db/index.js';
@@ -1219,27 +1220,11 @@ function validateBackupWebdavConfig(config: BackupWebdavConfig) {
 }
 
 async function fetchBackupWebdav(url: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-    controller.abort();
-  }, BACKUP_WEBDAV_FETCH_TIMEOUT_MS);
-
-  try {
-    return await fetch(url, {
-      ...init,
-      signal: controller.signal,
-    });
-  } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      throw new Error(`WebDAV 请求超时（${Math.max(1, Math.round(BACKUP_WEBDAV_FETCH_TIMEOUT_MS / 1000))}s）`);
-    }
-    throw error;
-  } finally {
-    if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
-      timeoutHandle = null;
-    }
-  }
+  return fetchWithTimeout(url, init, {
+    timeoutMs: BACKUP_WEBDAV_FETCH_TIMEOUT_MS,
+    maxResponseBytes: 20 * 1024 * 1024,
+    timeoutMessage: `WebDAV 请求超时（${Math.round(BACKUP_WEBDAV_FETCH_TIMEOUT_MS / 1000)}s）`,
+  });
 }
 
 function stopBackupWebdavScheduler() {
@@ -1969,6 +1954,7 @@ export async function exportBackupToWebdav(type?: BackupExportType) {
       const text = await response.text().catch(() => '');
       throw new Error(`WebDAV 导出失败：HTTP ${response.status}${text ? ` ${text.slice(0, 120)}` : ''}`);
     }
+    await response.body?.cancel();
 
     const syncedAt = new Date().toISOString();
     await writeBackupWebdavState({

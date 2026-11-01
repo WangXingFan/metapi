@@ -9,6 +9,7 @@ const { apiMock, viewport } = vi.hoisted(() => ({
   viewport: { mobile: false },
   apiMock: {
     getAccountsSnapshot: vi.fn(),
+    getAccountCredentials: vi.fn(),
     getAccountTokens: vi.fn(),
     syncAccountTokens: vi.fn(),
     getAccountTokenGroups: vi.fn(),
@@ -39,6 +40,23 @@ function collectText(node: ReactTestInstance): string {
 }
 
 describe('LiteKeys', () => {
+  it('reads a direct key only when copying and never renders its plaintext', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    apiMock.getAccountsSnapshot.mockResolvedValue({ sites: [], accounts: [{ id: 101, username: 'Direct', credentialMode: 'apikey', hasApiToken: true, apiTokenMasked: '••••••••', site: { id: 1, name: 'Site' } }] });
+    apiMock.getAccountCredentials.mockResolvedValue({ apiToken: 'sk-private-copy-only' });
+    let root!: ReactTestRenderer;
+    try {
+      await act(async () => { root = create(<MemoryRouter><ToastProvider><LiteKeys /></ToastProvider></MemoryRouter>); });
+      expect(apiMock.getAccountCredentials).not.toHaveBeenCalled();
+      expect(collectText(root.root)).toContain('••••••••');
+      await act(async () => { root.root.find((node) => node.type === 'button' && collectText(node) === '复制').props.onClick(); });
+      expect(apiMock.getAccountCredentials).toHaveBeenCalledWith(101);
+      expect(writeText).toHaveBeenCalledWith('sk-private-copy-only');
+      expect(collectText(root.root)).not.toContain('sk-private-copy-only');
+    } finally { root?.unmount(); vi.unstubAllGlobals(); }
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     viewport.mobile = false;

@@ -12,12 +12,8 @@ import {
 } from "./accountHealthService.js";
 import { parseCheckinRewardAmount } from "./checkinRewardParser.js";
 import { getLocalDayRangeUtc } from "./localTimeService.js";
-import {
-  readSnapshotCache,
-  type SnapshotEnvelope,
-} from "./snapshotCacheService.js";
+import type { SnapshotEnvelope } from "./snapshotCacheService.js";
 import { estimateRewardWithTodayIncomeFallback } from "./todayIncomeRewardService.js";
-import { createAdminSnapshotPersistence } from "./adminSnapshotStore.js";
 
 export type AccountCapabilities = {
   canCheckin: boolean;
@@ -25,8 +21,14 @@ export type AccountCapabilities = {
   proxyOnly: boolean;
 };
 
-export type AccountOverviewRow = typeof schema.accounts.$inferSelect & {
-  site: typeof schema.sites.$inferSelect;
+type SiteOverview = Pick<typeof schema.sites.$inferSelect, 'id' | 'name' | 'url' | 'platform' | 'status' | 'isPinned' | 'sortOrder'>;
+export type AccountOverviewRow = Pick<typeof schema.accounts.$inferSelect,
+  'id' | 'siteId' | 'username' | 'balance' | 'balanceUsed' | 'quota' | 'status' | 'isPinned' | 'sortOrder' |
+  'checkinEnabled' | 'lastCheckinAt' | 'lastBalanceRefresh' | 'oauthProvider' | 'createdAt' | 'updatedAt'> & {
+  site: SiteOverview;
+  platformUserId: number | null;
+  hasApiToken: boolean;
+  apiTokenMasked: string | null;
   credentialMode: AccountCredentialMode;
   capabilities: AccountCapabilities;
   todaySpend: number;
@@ -36,15 +38,13 @@ export type AccountOverviewRow = typeof schema.accounts.$inferSelect & {
 
 export type AccountsSnapshotPayload = {
   accounts: AccountOverviewRow[];
-  sites: Array<typeof schema.sites.$inferSelect>;
+  sites: SiteOverview[];
 };
 
-const ACCOUNTS_SNAPSHOT_TTL_MS = 15_000;
-const accountsSnapshotPersistence =
-  createAdminSnapshotPersistence<AccountsSnapshotPayload>({
-    namespace: "accounts-snapshot",
-    key: "all",
-  });
+function toSiteOverview(site: typeof schema.sites.$inferSelect): SiteOverview {
+  const { id, name, url, platform, status, isPinned, sortOrder } = site;
+  return { id, name, url, platform, status, isPinned, sortOrder };
+}
 
 function hasSessionTokenValue(value: string | null | undefined): boolean {
   return typeof value === "string" && value.trim().length > 0;
@@ -189,8 +189,25 @@ async function loadAccountsSnapshotPayload(): Promise<AccountsSnapshotPayload> {
       const credentialMode = resolveStoredCredentialMode(row.accounts);
       const capabilities = buildCapabilitiesForAccount(row.accounts);
       return {
-        ...row.accounts,
-        site: row.sites,
+        id: row.accounts.id,
+        siteId: row.accounts.siteId,
+        username: row.accounts.username,
+        balance: row.accounts.balance,
+        balanceUsed: row.accounts.balanceUsed,
+        quota: row.accounts.quota,
+        status: row.accounts.status,
+        isPinned: row.accounts.isPinned,
+        sortOrder: row.accounts.sortOrder,
+        checkinEnabled: row.accounts.checkinEnabled,
+        lastCheckinAt: row.accounts.lastCheckinAt,
+        lastBalanceRefresh: row.accounts.lastBalanceRefresh,
+        oauthProvider: row.accounts.oauthProvider,
+        createdAt: row.accounts.createdAt,
+        updatedAt: row.accounts.updatedAt,
+        platformUserId: resolvePlatformUserId(row.accounts.extraConfig, row.accounts.username) ?? null,
+        hasApiToken: !!row.accounts.apiToken?.trim(),
+        apiTokenMasked: row.accounts.apiToken?.trim() ? '••••••••' : null,
+        site: toSiteOverview(row.sites),
         credentialMode,
         capabilities,
         todaySpend:
@@ -216,21 +233,20 @@ async function loadAccountsSnapshotPayload(): Promise<AccountsSnapshotPayload> {
         }),
       };
     }),
-    sites,
+    sites: sites.map(toSiteOverview),
   };
 }
 
-export async function getAccountsSnapshot(options?: {
+export async function getAccountsSnapshot(_options?: {
   forceRefresh?: boolean;
 }): Promise<SnapshotEnvelope<AccountsSnapshotPayload>> {
-  return readSnapshotCache({
-    namespace: "accounts-snapshot",
-    key: "all",
-    ttlMs: ACCOUNTS_SNAPSHOT_TTL_MS,
-    forceRefresh: options?.forceRefresh,
-    persistence: accountsSnapshotPersistence,
-    loader: loadAccountsSnapshotPayload,
-  });
+  // The Lite list is read on demand. Do not persist credentials or serve stale
+  // records after writes, imports, or runtime database changes.
+  return {
+    payload: await loadAccountsSnapshotPayload(),
+    generatedAt: new Date().toISOString(),
+    cacheStatus: 'disabled',
+  };
 }
 
 export async function getAccountStoredCredentials(accountId: number) {

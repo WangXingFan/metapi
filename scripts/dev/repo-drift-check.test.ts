@@ -13,6 +13,14 @@ function writeWorkspaceFiles(root: string, files: Record<string, string>): void 
 }
 
 describe('repo drift check', () => {
+  it('rejects runtime service re-exports from routes and transformer runtime dependencies', () => {
+    const root = mkdtempSync(join(tmpdir(), 'metapi-boundaries-'));
+    writeWorkspaceFiles(root, {
+      'src/server/services/runtimeDispatch.ts': "export { dispatch } from '../routes/proxy/runtimeExecutor.js';\n",
+      'src/server/transformers/invalid.ts': "import type { FastifyRequest } from 'fastify';\nimport { tokenRouter } from '../services/tokenRouter.js';\n",
+    });
+    expect(runRepoDriftCheck({ root }).violations).toHaveLength(3);
+  });
   it('separates new violations from tracked debt', () => {
     const root = mkdtempSync(join(tmpdir(), 'metapi-repo-drift-'));
     writeWorkspaceFiles(root, {

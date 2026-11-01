@@ -1,14 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api.js";
 import { MobileCard, MobileField } from "../components/MobileCard.js";
 import RefreshButton from "../components/RefreshButton.js";
 import ResponsiveFilterPanel from "../components/ResponsiveFilterPanel.js";
 import { useToast } from "../components/Toast.js";
 import { useIsMobile } from "../components/useIsMobile.js";
-import {
-  formatCheckinLogTime,
-  parseServerUtcDateTime,
-} from "./helpers/checkinLogTime.js";
+import { formatCheckinLogTime } from "./helpers/checkinLogTime.js";
 import { tr } from "../i18n.js";
 
 type LogFilter = "all" | "success" | "failed" | "skipped";
@@ -101,6 +98,11 @@ function clampProgressPercent(value: unknown): number {
 
 export default function CheckinLog() {
   const [logs, setLogs] = useState<any[]>([]);
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState({ all: 0, success: 0, failed: 0, skipped: 0 });
+  const loadSequence = useRef(0);
+  const pageSize = 50;
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -116,11 +118,6 @@ export default function CheckinLog() {
     const raw = (log.checkin_logs?.status || log.status || "failed") as string;
     if (raw === "success" || raw === "skipped") return raw;
     return "failed";
-  }
-
-  function getCreatedAtDate(log: any): Date | null {
-    const createdAt = log.checkin_logs?.createdAt || log.createdAt;
-    return parseServerUtcDateTime(createdAt);
   }
 
   const initialTimeRange = useMemo(() => getTodayTimeRangeInput(), []);
@@ -140,53 +137,40 @@ export default function CheckinLog() {
     fromMs !== null && toMs !== null && fromMs >= toMs,
   );
 
-  const timeFilteredLogs = useMemo(() => {
-    if (hasInvalidTimeRange) return [];
-
-    return logs.filter((log) => {
-      const createdAtDate = getCreatedAtDate(log);
-      if (!createdAtDate) return false;
-
-      const createdAtMs = createdAtDate.getTime();
-      if (fromMs !== null && createdAtMs < fromMs) return false;
-      if (toExclusiveMs !== null && createdAtMs >= toExclusiveMs) return false;
-      return true;
-    });
-  }, [fromMs, hasInvalidTimeRange, logs, toExclusiveMs]);
-
-  const statusFilteredLogs = useMemo(
-    () =>
-      filter === "all"
-        ? timeFilteredLogs
-        : timeFilteredLogs.filter((log) => getStatus(log) === filter),
-    [filter, timeFilteredLogs],
-  );
-
-  // 兼容旧命名：后面渲染统一用 filtered
-  const filtered = statusFilteredLogs;
-
-  const countBy = useMemo(
-    () => (target: Exclude<LogFilter, "all">) =>
-      timeFilteredLogs.filter((log) => getStatus(log) === target).length,
-    [timeFilteredLogs],
-  );
+  const filtered = logs;
+  const countBy = (target: Exclude<LogFilter, "all">) => counts[target];
 
   const clearTimeRange = () => {
     setFromInput("");
     setToInput("");
   };
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const data = await api.getCheckinLogs("limit=100");
-      setLogs(Array.isArray(data) ? data : []);
-    } catch (e: any) {
-      toast.error(e.message || "加载签到记录失败");
-    } finally {
+  const load = useCallback(async () => {
+    const sequence = ++loadSequence.current;
+    if (hasInvalidTimeRange) {
+      setLogs([]);
+      setTotal(0);
+      setCounts({ all: 0, success: 0, failed: 0, skipped: 0 });
       setLoading(false);
+      return;
     }
-  };
+    setLoading(true);
+    const params = new URLSearchParams({ paged: "1", limit: String(pageSize), offset: String(page * pageSize), status: filter });
+    if (fromMs !== null) params.set("from", new Date(fromMs).toISOString());
+    if (toExclusiveMs !== null) params.set("to", new Date(toExclusiveMs).toISOString());
+    try {
+      const data = await api.getCheckinLogs(params.toString());
+      if (sequence !== loadSequence.current) return;
+      setLogs(data.logs);
+      setTotal(data.total);
+      setCounts(data.counts);
+      if (page > 0 && data.total <= page * pageSize) setPage(Math.max(0, Math.ceil(data.total / pageSize) - 1));
+    } catch (e: any) {
+      if (sequence === loadSequence.current) toast.error(e.message || "加载签到记录失败");
+    } finally {
+      if (sequence === loadSequence.current) setLoading(false);
+    }
+  }, [filter, fromMs, toExclusiveMs, hasInvalidTimeRange, page, toast]);
 
   const refreshQueueStatus = useCallback(async (showLoading = false) => {
     if (showLoading) setQueueStatusLoading(true);
@@ -202,9 +186,11 @@ export default function CheckinLog() {
     }
   }, [toast]);
 
+  useEffect(() => { setPage(0); }, [filter, fromMs, toExclusiveMs]);
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+    return () => { loadSequence.current += 1; };
+  }, [load]);
 
   useEffect(() => {
     let cancelled = false;
@@ -322,7 +308,7 @@ export default function CheckinLog() {
   const filterTabs = (
     <div className="pill-tabs">
       {[
-        { key: "all" as const, label: "全部", count: timeFilteredLogs.length },
+        { key: "all" as const, label: "全部", count: counts.all },
         { key: "success" as const, label: "成功", count: countBy("success") },
         { key: "failed" as const, label: "失败", count: countBy("failed") },
         { key: "skipped" as const, label: "跳过", count: countBy("skipped") },
@@ -744,6 +730,14 @@ export default function CheckinLog() {
             </tbody>
           </table>
         )}
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: 16 }}>
+          <span>共 {total} 条，第 {page + 1} / {Math.max(1, Math.ceil(total / pageSize))} 页</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-secondary" disabled={loading || page === 0} onClick={() => setPage((value) => value - 1)}>上一页</button>
+            <button className="btn btn-secondary" disabled={loading || (page + 1) * pageSize >= total} onClick={() => setPage((value) => value + 1)}>下一页</button>
+          </div>
+        </div>
 
         {!loading && filtered.length === 0 && (
           <div className="empty-state">

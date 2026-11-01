@@ -1,3 +1,4 @@
+import { buildDatabaseTlsOptions } from './tlsOptions.js';
 import Database from 'better-sqlite3';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import mysql from 'mysql2/promise';
@@ -360,7 +361,7 @@ async function introspectSqliteSchema(connectionString: string): Promise<SchemaC
 async function introspectMySqlSchema(input: SchemaIntrospectionInput): Promise<SchemaContract> {
   const connectionOptions: mysql.ConnectionOptions = { uri: input.connectionString };
   if (input.ssl) {
-    connectionOptions.ssl = { rejectUnauthorized: false };
+    connectionOptions.ssl = buildDatabaseTlsOptions();
   }
   const connection = await mysql.createConnection(connectionOptions);
 
@@ -534,7 +535,7 @@ async function introspectMySqlSchema(input: SchemaIntrospectionInput): Promise<S
 async function introspectPostgresSchema(input: SchemaIntrospectionInput): Promise<SchemaContract> {
   const clientOptions: pg.ClientConfig = { connectionString: input.connectionString };
   if (input.ssl) {
-    clientOptions.ssl = { rejectUnauthorized: false };
+    clientOptions.ssl = buildDatabaseTlsOptions();
   }
   installPostgresJsonTextParsers();
   const client = new pg.Client(clientOptions);
@@ -762,7 +763,7 @@ async function applyMySqlStatements(
 ): Promise<void> {
   const connectionOptions: mysql.ConnectionOptions = { uri: connectionString };
   if (ssl) {
-    connectionOptions.ssl = { rejectUnauthorized: false };
+    connectionOptions.ssl = buildDatabaseTlsOptions();
   }
   const connection = await mysql.createConnection(connectionOptions);
   try {
@@ -785,7 +786,7 @@ async function applyPostgresStatements(
 ): Promise<void> {
   const clientOptions: pg.ClientConfig = { connectionString };
   if (ssl) {
-    clientOptions.ssl = { rejectUnauthorized: false };
+    clientOptions.ssl = buildDatabaseTlsOptions();
   }
   installPostgresJsonTextParsers();
   const client = new pg.Client(clientOptions);

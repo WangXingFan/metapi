@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetch } from 'undici';
-import type { BuiltEndpointRequest } from './endpointFlow.js';
+import type { ProxyRuntimeRequest as BuiltEndpointRequest } from './executors/types.js';
 
 vi.mock('undici', async (importOriginal) => {
   const actual = await importOriginal<typeof import('undici')>();
