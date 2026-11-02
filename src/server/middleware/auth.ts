@@ -1,6 +1,7 @@
 import { isIP } from 'node:net';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { config } from '../config.js';
+import { isPublicApiRoute } from '../desktop.js';
 import { authorizeDownstreamToken, consumeManagedKeyRequest } from '../services/downstreamApiKeyService.js';
 import { EMPTY_DOWNSTREAM_ROUTING_POLICY, type DownstreamRoutingPolicy } from '../services/downstreamPolicyTypes.js';
 
@@ -96,6 +97,14 @@ export function isIpAllowed(clientIp: string, allowlist: string[]): boolean {
     if (clientIpv4Value === null) return false;
     return (clientIpv4Value & entry.mask) === entry.network;
   });
+}
+
+export async function adminApiAuthMiddleware(request: FastifyRequest, reply: FastifyReply) {
+  // Fastify matches percent-encoded URLs; use its route pattern for the auth boundary too.
+  const route = request.routeOptions.url ?? '';
+  if (route.startsWith('/api/') && !isPublicApiRoute(route)) {
+    await authMiddleware(request, reply);
+  }
 }
 
 export async function authMiddleware(request: FastifyRequest, reply: FastifyReply) {
