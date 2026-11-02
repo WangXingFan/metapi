@@ -1,5 +1,4 @@
 import type { RequestInit as UndiciRequestInit } from 'undici';
-import { createContext, runInContext } from 'node:vm';
 import { withSiteProxyRequestInit } from '../siteProxy.js';
 
 const SHIELD_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
@@ -48,7 +47,7 @@ export function hasUsableSessionCookie(cookieHeader: string): boolean {
 }
 
 function parseChallengeArg1(html: string): string | null {
-  const match = html.match(/var\s+arg1\s*=\s*['"]([0-9a-fA-F]+)['"]/);
+  const match = html.match(/var\s+arg1\s*=\s*['"]([0-9a-fA-F]{40})['"]/);
   return match?.[1]?.toUpperCase() || null;
 }
 
@@ -63,35 +62,28 @@ function parseChallengeMapping(html: string): number[] | null {
     return Number.parseInt(value, 10);
   });
 
-  if (values.some((value) => Number.isNaN(value))) return null;
+  if (values.length !== 40 || new Set(values).size !== 40
+    || values.some((value) => !Number.isInteger(value) || value < 1 || value > 40)) return null;
   return values;
 }
 
 function parseChallengeXorSeed(html: string): string | null {
-  const fnStart = html.indexOf('function a0i()');
-  const bStart = html.indexOf('function b(');
-  const rotateStart = html.indexOf('(function(a,c){');
-  const rotateEnd = html.indexOf('),!(function', rotateStart);
-  if (fnStart < 0 || bStart < 0 || bStart <= fnStart || rotateStart < 0 || rotateEnd < 0) {
-    return null;
+  // Read the literal string table only. Upstream JavaScript must never run here.
+  // The supported challenge encodes its one 40-hex-digit XOR seed with this alphabet;
+  // rotating the table changes its index but not its value.
+  const table = html.match(/function a0i\(\)\s*\{\s*var\s+\w+\s*=\s*\[([^\]]+)\]/)?.[1];
+  if (!table) return null;
+  const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/';
+  const standardAlphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const seeds = new Set<string>();
+  for (const match of table.matchAll(/['"]([A-Za-z0-9+/=]+)['"]/g)) {
+    const base64 = Array.from(match[1], (char) => char === '='
+      ? char
+      : standardAlphabet[alphabet.indexOf(char)]).join('');
+    const decoded = Buffer.from(base64, 'base64').toString('utf8');
+    if (/^[0-9a-f]{40}$/i.test(decoded)) seeds.add(decoded);
   }
-
-  const helperCode = html.slice(fnStart, bStart);
-  const rotateCode = `${html.slice(rotateStart, rotateEnd + 1)})`;
-
-  try {
-    const sandbox: Record<string, unknown> = { decodeURIComponent };
-    createContext(sandbox);
-    runInContext(helperCode, sandbox, { timeout: 100 });
-    runInContext(rotateCode, sandbox, { timeout: 100 });
-    const decoder = sandbox.a0j;
-    if (typeof decoder !== 'function') return null;
-    const seed = (decoder as (index: number) => unknown)(0x115);
-    if (typeof seed !== 'string' || !/^[0-9a-f]+$/i.test(seed)) return null;
-    return seed;
-  } catch {
-    return null;
-  }
+  return seeds.size === 1 ? seeds.values().next().value! : null;
 }
 
 export function solveNewApiAcwScV2(html: string): string | null {
