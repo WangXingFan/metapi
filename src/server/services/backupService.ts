@@ -1220,7 +1220,8 @@ function validateBackupWebdavConfig(config: BackupWebdavConfig) {
 }
 
 async function fetchBackupWebdav(url: string, init: RequestInit): Promise<Response> {
-  return fetchWithTimeout(url, init, {
+  // A redirect must not send the backup body to a different destination.
+  return fetchWithTimeout(url, { ...init, redirect: 'manual' }, {
     timeoutMs: BACKUP_WEBDAV_FETCH_TIMEOUT_MS,
     maxResponseBytes: 20 * 1024 * 1024,
     timeoutMessage: `WebDAV 请求超时（${Math.round(BACKUP_WEBDAV_FETCH_TIMEOUT_MS / 1000)}s）`,

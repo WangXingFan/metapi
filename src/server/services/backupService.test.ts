@@ -2,6 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { asc, eq } from 'drizzle-orm';
 
 type DbModule = typeof import('../db/index.js');
@@ -1570,6 +1572,42 @@ describe('backupService', () => {
     expect(syncState?.value).toContain('"lastError":null');
 
     fetchSpy.mockRestore();
+  });
+
+  it.each([307, 308])('does not forward backup secrets to another server after HTTP %s', async (status) => {
+    let leakedBody = '';
+    let forwardedRequests = 0;
+    const collector = createServer((request, response) => {
+      forwardedRequests++;
+      request.on('data', (chunk) => { leakedBody += chunk.toString(); });
+      request.on('end', () => { response.writeHead(201); response.end(); });
+    });
+    await new Promise<void>((resolve) => collector.listen(0, '127.0.0.1', resolve));
+    const collectorUrl = `http://127.0.0.1:${(collector.address() as AddressInfo).port}/backup`;
+    const webdav = createServer((request, response) => {
+      request.resume();
+      response.writeHead(status, { Location: collectorUrl });
+      response.end();
+    });
+    await new Promise<void>((resolve) => webdav.listen(0, '127.0.0.1', resolve));
+    try {
+      await db.insert(schema.settings).values([
+        { key: 'smtp_pass', value: JSON.stringify('test-only-backup-secret') },
+        { key: 'backup_webdav_config_v1', value: JSON.stringify({
+          enabled: true,
+          fileUrl: `http://127.0.0.1:${(webdav.address() as AddressInfo).port}/backup`,
+          exportType: 'preferences',
+        }) },
+      ]).run();
+      await expect(backupService.exportBackupToWebdav()).rejects.toThrow(`HTTP ${status}`);
+      expect(forwardedRequests).toBe(0);
+      expect(leakedBody).toBe('');
+    } finally {
+      await Promise.all([collector, webdav].map((server) => new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+        server.closeAllConnections();
+      })));
+    }
   });
 
   it('imports backup payload from webdav into local data', async () => {
