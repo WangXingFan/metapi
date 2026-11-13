@@ -25,6 +25,7 @@ Authorization: Bearer <AUTH_TOKEN>
 | `POST` | `/api/accounts` | 直接导入凭据 |
 | `PUT` | `/api/accounts/:id` | 更新账户 |
 | `DELETE` | `/api/accounts/:id` | 删除账户 |
+| `GET` | `/api/accounts/:id/usage-24h` | 查询账户近 24 小时的上游消耗 |
 
 ## 账号 Key
 

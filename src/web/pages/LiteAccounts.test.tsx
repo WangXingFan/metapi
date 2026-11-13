@@ -12,6 +12,7 @@ const { apiMock } = vi.hoisted(() => ({
     updateRuntimeSettings: vi.fn(),
     updateAccount: vi.fn(),
     refreshBalance: vi.fn(),
+    getAccountUsage24h: vi.fn(),
     rebindAccountSession: vi.fn(),
   },
 }));
@@ -45,6 +46,7 @@ describe('LiteAccounts', () => {
     apiMock.updateRuntimeSettings.mockResolvedValue({ success: true });
     apiMock.updateAccount.mockResolvedValue({ success: true });
     apiMock.refreshBalance.mockResolvedValue({ balance: 88 });
+    apiMock.getAccountUsage24h.mockResolvedValue({ supported: true, spend: null });
     apiMock.rebindAccountSession.mockResolvedValue({ success: true });
   });
 
@@ -202,7 +204,7 @@ describe('LiteAccounts', () => {
     }
   });
 
-  it('shows today balance deltas below the account balance', async () => {
+  it('shows the last 24h spend below the account balance', async () => {
     apiMock.getAccountsSnapshot.mockResolvedValue({
       sites: [{ id: 1, name: 'Alpha Site', platform: 'openai' }],
       accounts: [
@@ -212,7 +214,7 @@ describe('LiteAccounts', () => {
           credentialMode: 'session',
           balance: 42,
           todayReward: 3.5,
-          todaySpend: 1.25,
+          last24hSpend: 1.25,
           site: { id: 1, name: 'Alpha Site', url: 'https://alpha.example' },
         },
         {
@@ -221,7 +223,7 @@ describe('LiteAccounts', () => {
           credentialMode: 'session',
           balance: 10,
           todayReward: 0,
-          todaySpend: 0,
+          last24hSpend: 0,
           site: { id: 1, name: 'Alpha Site', url: 'https://alpha.example' },
         },
       ],
@@ -241,7 +243,7 @@ describe('LiteAccounts', () => {
       await flushMicrotasks();
 
       const text = collectText(root.root);
-      expect(text).toContain('42.00+3.50-1.25');
+      expect(text).toContain('42.00+3.50近24h -1.25');
       expect(text).toContain('10.00');
       expect(text).not.toContain('+0.00');
       expect(text).not.toContain('-0.00');
@@ -295,6 +297,49 @@ describe('LiteAccounts', () => {
       const text = collectText(root.root);
       expect(text).toContain('88.50');
       expect(text).not.toContain('已用 6.25');
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('hydrates the 24h spend for usage-capable accounts', async () => {
+    apiMock.getAccountsSnapshot.mockResolvedValue({
+      sites: [{ id: 1, name: 'Alpha Site', platform: 'new-api' }],
+      accounts: [
+        {
+          id: 101,
+          username: 'Alpha Account',
+          credentialMode: 'session',
+          balance: 10,
+          canReadUsageLogs: true,
+          site: { id: 1, name: 'Alpha Site', url: 'https://alpha.example' },
+        },
+      ],
+    });
+    apiMock.getAccountUsage24h.mockResolvedValue({
+      supported: true,
+      spend: 2.5,
+      startAt: '2026-11-12T12:00:00.000Z',
+      endAt: '2026-11-13T12:00:00.000Z',
+      fetchedAt: '2026-11-13T12:00:00.000Z',
+    });
+
+    let root!: ReactTestRenderer;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/accounts']}>
+            <ToastProvider>
+              <LiteAccounts />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+      await flushMicrotasks();
+
+      expect(apiMock.getAccountUsage24h).toHaveBeenCalledWith(101);
+      expect(collectText(root.root)).toContain('10.00近24h -2.50');
     } finally {
       root?.unmount();
     }

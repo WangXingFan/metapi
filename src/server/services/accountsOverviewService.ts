@@ -14,6 +14,11 @@ import { parseCheckinRewardAmount } from "./checkinRewardParser.js";
 import { getLocalDayRangeUtc } from "./localTimeService.js";
 import type { SnapshotEnvelope } from "./snapshotCacheService.js";
 import { estimateRewardWithTodayIncomeFallback } from "./todayIncomeRewardService.js";
+import {
+  getStoredUsage24hSnapshot,
+  isUsage24hSnapshotFresh,
+  supportsUpstreamUsageLogs,
+} from "./upstreamUsageLogService.js";
 
 export type AccountCapabilities = {
   canCheckin: boolean;
@@ -32,6 +37,8 @@ export type AccountOverviewRow = Pick<typeof schema.accounts.$inferSelect,
   credentialMode: AccountCredentialMode;
   capabilities: AccountCapabilities;
   todaySpend: number;
+  last24hSpend: number | null;
+  canReadUsageLogs: boolean;
   todayReward: number;
   runtimeHealth: RuntimeHealthInfo;
 };
@@ -188,6 +195,7 @@ async function loadAccountsSnapshotPayload(): Promise<AccountsSnapshotPayload> {
     accounts: rows.map((row) => {
       const credentialMode = resolveStoredCredentialMode(row.accounts);
       const capabilities = buildCapabilitiesForAccount(row.accounts);
+      const usageSnapshot = getStoredUsage24hSnapshot(row.accounts.extraConfig);
       return {
         id: row.accounts.id,
         siteId: row.accounts.siteId,
@@ -210,6 +218,13 @@ async function loadAccountsSnapshotPayload(): Promise<AccountsSnapshotPayload> {
         site: toSiteOverview(row.sites),
         credentialMode,
         capabilities,
+        last24hSpend:
+          usageSnapshot && isUsage24hSnapshotFresh(usageSnapshot)
+            ? usageSnapshot.spend
+            : null,
+        canReadUsageLogs:
+          capabilities.canRefreshBalance
+          && supportsUpstreamUsageLogs(row.sites.platform),
         todaySpend:
           Math.round((spendByAccount[row.accounts.id] || 0) * 1_000_000) /
           1_000_000,

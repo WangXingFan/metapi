@@ -4,6 +4,7 @@ import { insertAndGetById } from "../../db/insertHelpers.js";
 import { and, eq, gte, lt, sql } from "drizzle-orm";
 import { refreshBalance } from "../../services/balanceService.js";
 import { getAdapter } from "../../services/platforms/index.js";
+import { getAccountUsage24h } from "../../services/upstreamUsageLogService.js";
 import {
   convergeAccountMutation,
   rebuildRoutesBestEffort,
@@ -506,6 +507,22 @@ export async function accountsRoutes(app: FastifyInstance) {
         accounts: snapshot.payload.accounts,
         sites: snapshot.payload.sites,
       };
+    },
+  );
+
+  app.get<{ Params: { id: string }; Querystring: { refresh?: string } }>(
+    "/api/accounts/:id/usage-24h",
+    async (request, reply) => {
+      const accountId = Number.parseInt(request.params.id, 10);
+      if (!Number.isFinite(accountId) || accountId <= 0) {
+        return reply.code(400).send({ message: "账号 ID 无效" });
+      }
+      reply.header("Cache-Control", "no-store");
+      const result = await getAccountUsage24h(accountId, {
+        forceRefresh: parseBooleanFlag(request.query.refresh),
+      });
+      if (!result) return reply.code(404).send({ message: "账号不存在" });
+      return result;
     },
   );
 

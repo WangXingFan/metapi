@@ -38,7 +38,8 @@ type AccountItem = {
   credentialMode?: "session" | "apikey" | string;
   checkinEnabled?: boolean;
   balance?: number | null;
-  todaySpend?: number | null;
+  last24hSpend?: number | null;
+  canReadUsageLogs?: boolean;
   todayReward?: number | null;
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -139,6 +140,10 @@ function canRefreshAccountBalance(account: AccountItem): boolean {
   return account.capabilities?.canRefreshBalance === true;
 }
 
+function canReadAccountUsageLogs(account: AccountItem): boolean {
+  return account.canReadUsageLogs === true;
+}
+
 function canRebindAccount(account: AccountItem): boolean {
   return account.status === "expired" && account.credentialMode !== "apikey";
 }
@@ -201,7 +206,7 @@ function formatSpentBalanceDelta(value: unknown): string | null {
 
 function BalanceDisplay({ account }: { account: AccountItem }) {
   const rewardText = formatSignedBalanceDelta(account.todayReward);
-  const spendText = formatSpentBalanceDelta(account.todaySpend);
+  const spendText = formatSpentBalanceDelta(account.last24hSpend);
   return (
     <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
       <span style={monoTextStyle}>{formatAccountBalance(account.balance)}</span>
@@ -228,9 +233,9 @@ function BalanceDisplay({ account }: { account: AccountItem }) {
                 fontWeight: 700,
                 lineHeight: 1.2,
               }}
-              title="今日消耗的余额"
+              title="近24小时消耗的余额"
             >
-              {spendText}
+              近24h {spendText}
             </span>
           ) : null}
         </span>
@@ -295,6 +300,20 @@ export default function LiteAccounts() {
   const preferredCreateMode: CreateMode =
     requestedSegment === "apikey" ? "credential" : "login";
 
+  const hydrateUsageSummaries = async (items: AccountItem[]) => {
+    const targets = items.filter(canReadAccountUsageLogs);
+    await Promise.all(targets.map(async (account) => {
+      try {
+        const usage = await api.getAccountUsage24h(account.id);
+        const spend = usage?.spend;
+        if (!usage?.supported || typeof spend !== "number") return;
+        setAccounts((current) => current.map((item) => (
+          item.id === account.id ? { ...item, last24hSpend: spend } : item
+        )));
+      } catch {}
+    }));
+  };
+
   const load = async () => {
     setLoading(true);
     try {
@@ -305,6 +324,7 @@ export default function LiteAccounts() {
       );
       setSites(nextSites);
       setAccounts(nextAccounts);
+      void hydrateUsageSummaries(nextAccounts);
     } catch (error: any) {
       toast.error(error?.message || "加载账户失败");
     } finally {
@@ -579,12 +599,19 @@ export default function LiteAccounts() {
     setActionId(`balance-${account.id}`);
     try {
       const result = await api.refreshBalance(account.id);
+      const usage = canReadAccountUsageLogs(account)
+        ? await api.getAccountUsage24h(account.id, { refresh: true }).catch(() => null)
+        : null;
       setAccounts((current) =>
         current.map((item) =>
           item.id === account.id
             ? {
                 ...item,
                 balance: typeof result?.balance === "number" ? result.balance : item.balance,
+                last24hSpend:
+                  usage?.supported && typeof usage.spend === "number"
+                    ? usage.spend
+                    : item.last24hSpend,
                 updatedAt: new Date().toISOString(),
               }
             : item,

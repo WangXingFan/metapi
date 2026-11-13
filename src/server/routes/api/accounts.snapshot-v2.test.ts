@@ -122,6 +122,12 @@ describe("accounts snapshot v2", () => {
             latest: 3.2,
             updatedAt: `${today}T08:00:00.000Z`,
           },
+          usage24hSnapshot: {
+            spend: 0.75,
+            startAt: new Date(Date.now() - 86_400_000).toISOString(),
+            endAt: new Date().toISOString(),
+            fetchedAt: new Date().toISOString(),
+          },
         }),
       })
       .returning()
@@ -161,6 +167,8 @@ describe("accounts snapshot v2", () => {
         id: number;
         site: { id: number; name: string };
         todaySpend: number;
+        last24hSpend: number | null;
+        canReadUsageLogs: boolean;
         todayReward: number;
       }>;
       sites: Array<{ id: number; name: string }>;
@@ -175,6 +183,8 @@ describe("accounts snapshot v2", () => {
         id: account.id,
         site: expect.objectContaining({ id: site.id, name: "snapshot-site" }),
         todaySpend: 1.25,
+        last24hSpend: 0.75,
+        canReadUsageLogs: true,
         todayReward: 3.2,
       }),
     ]);

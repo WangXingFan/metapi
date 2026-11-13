@@ -834,6 +834,18 @@ export const api = {
     }),
   refreshBalance: (id: number) =>
     request(`/api/accounts/${id}/balance`, { method: "POST" }),
+  getAccountUsage24h: (id: number, options?: { refresh?: boolean }) =>
+    request(
+      `/api/accounts/${id}/usage-24h${buildQueryString(options?.refresh ? { refresh: 1 } : undefined)}`,
+    ) as Promise<{
+      supported: boolean;
+      spend: number | null;
+      startAt: string | null;
+      endAt: string | null;
+      fetchedAt: string | null;
+      cached?: boolean;
+      reason?: string;
+    }>,
   getAccountModels: (id: number) => request(`/api/accounts/${id}/models`),
   addAccountAvailableModels: (accountId: number, models: string[]) =>
     request(`/api/accounts/${accountId}/models/manual`, {
